@@ -1,0 +1,16 @@
+[[language]]
+name = "ocaml"
+language-servers = ["ocamllsp"]
+formatter = { command = "ocamlformat", args = ["--impl", "-"] }
+auto-format = true
+indent = { tab-width = 2, unit = "  " }
+
+[[language]]
+name = "ocaml-interface"
+language-servers = ["ocamllsp"]
+formatter = { command = "ocamlformat", args = ["--intf", "-"] }
+auto-format = true
+indent = { tab-width = 2, unit = "  " }
+
+[language-server.ocamllsp]
+command = "ocamllsp"
