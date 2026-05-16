@@ -1,72 +1,84 @@
-type reg = int
-type func_id = int
+type reg = Reg of int [@@unboxed] [@@immediate64]
+type func_id = Func_id of int [@@unboxed] [@@immediate64]
+type prim_id = Prim_id of int [@@unboxed] [@@immediate64]
 
 type t =
-  | Add_int of reg * reg * reg
-  | Sub_int of reg * reg * reg
-  | Mul_int of reg * reg * reg
-  | Div_int of reg * reg * reg
-  | Mod_int of reg * reg * reg
-  | Neg_int of reg * reg
-  (**)
-  | Add_float of reg * reg * reg
-  | Sub_float of reg * reg * reg
-  | Mul_float of reg * reg * reg
-  | Div_float of reg * reg * reg
-  | Neg_float of reg * reg
-  (**)
-  | Eq_int of reg * reg * reg
-  | Ne_int of reg * reg * reg
-  | Lt_int of reg * reg * reg
-  | Le_int of reg * reg * reg
-  | Gt_int of reg * reg * reg
-  | Ge_int of reg * reg * reg
-  (**)
-  | Eq_float of reg * reg * reg
-  | Ne_float of reg * reg * reg
-  | Lt_float of reg * reg * reg
-  | Le_float of reg * reg * reg
-  | Gt_float of reg * reg * reg
-  | Ge_float of reg * reg * reg
-  (**)
-  | And of reg * reg * reg
-  | Or of reg * reg * reg
-  | Not of reg * reg
-  (**)
-  | Cast_int_as_float of reg * reg
-  | Cast_float_as_int of reg * reg
-  (**)
-  | Mov of reg * reg
-  | Load_int of reg * int
-  | Load_float of reg * float
-  | Load_bool of reg * bool
-  (**)
-  | Jmp of int
-  | Jt of reg * int
-  | Jf of reg * int
-  (**)
-  | Call of func_id * reg list * reg
-  | Tail_call of func_id * reg list
-  | Ret of reg
-  | Ret_unit
-  (**)
-  | Alloc of reg * int * int
-  | Load_field of reg * reg * int
-  | Store_field of reg * int * reg
-  | Alloc_array of reg * reg * int
-  | Load_array of reg * reg * reg
-  | Store_array of reg * reg * reg
-  | Length_array of reg * reg
-  | Load_tag of reg * reg
-  | Store_tag of reg * int
-  (**)
-  | Make_closure of reg * func_id * reg list
-  | Call_closure of reg * reg list * reg
-  | Load_upvar of reg * reg * int
-  (**)
-  | Trap of int
-  | Pop_trap
-  | Raise of reg
-  (**)
+  | Load_int_imm of reg * int  (** dst, imm *)
+  | Load_float_pool_idx of reg * int  (** dst, pool_index *)
+  | Add_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Add_int_imm of reg * reg * int  (** dst, src, imm *)
+  | Add_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | Sub_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Sub_int_imm of reg * reg * int  (** dst, src, imm *)
+  | Sub_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | Mul_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Mul_int_imm of reg * reg * int  (** dst, src, imm *)
+  | Mul_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | Div_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Div_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | Mod_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Neg_int of reg * reg  (** dst, src *)
+  | Neg_float of reg * reg  (** dst, src *)
+  | Eq_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Eq_int_imm of reg * reg * int  (** dst, src, imm *)
+  | Eq_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | Ne_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Ne_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | Lt_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Lt_int_imm of reg * reg * int  (** dst, src, imm *)
+  | Lt_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | Le_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Le_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | Gt_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Gt_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | Ge_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Ge_float of reg * reg * reg  (** dst, lhs, rhs *)
+  | And_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | And_int_imm of reg * reg * int  (** dst, lhs, imm *)
+  | Or_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Or_int_imm of reg * reg * int  (** dst, lhs, imm *)
+  | Xor_int of reg * reg * reg  (** dst, lhs, rhs *)
+  | Xor_int_imm of reg * reg * int  (** dst, lhs, imm *)
+  | Not_int of reg * reg  (** dst, src *)
+  | Cast_int_float of reg * reg  (** dst, src *)
+  | Cast_float_int of reg * reg  (** dst, src *)
+  | Mov of reg * reg  (** dst, src *)
+  | Jmp of int  (** offset *)
+  | Jmp_table of reg * int  (** tag, table_size *)
+  | Jmp_table_offset of int  (** offset *)
+  | Jt of reg * int  (** cond, offset *)
+  | Jf of reg * int  (** cond, offset *)
+  | Call of reg * func_id * reg * int  (** dst, callee, args_base, nargs *)
+  | Call_closure of reg * reg * reg * int  (** dst, callee, args_base, nargs *)
+  | Call_prim of reg * prim_id * reg * int  (** dst, callee, args_base, nargs *)
+  | Call_prim_managed of reg * prim_id * reg * int
+      (** dst, callee, args_base, nargs *)
+  | Tail_call of func_id * reg * int  (** callee, args_base, nargs *)
+  | Tail_call_closure of reg * reg * int  (** callee, args_base, nargs *)
+  | Ret of reg  (** src *)
+  | Alloc of reg * int  (** dst, nfields *)
+  | Alloc_array of reg * reg  (** dst, nfields_reg *)
+  | Load_byte of reg * reg * reg  (** dst, base, index *)
+  | Load_field_int of reg * reg * int  (** dst, base, index *)
+  | Load_field_float of reg * reg * int  (** dst, base, index *)
+  | Load_field_ptr of reg * reg * int  (** dst, base, index *)
+  | Load_array_int of reg * reg * reg  (** dst, base, index *)
+  | Load_array_float of reg * reg * reg  (** dst, base, index *)
+  | Load_array_ptr of reg * reg * reg  (** dst, base, index *)
+  | Load_tag of reg * reg  (** dst, src *)
+  | Load_upvar of reg * reg * int  (** dst, closure, index *)
+  | Store_byte of reg * reg * reg  (** base, src, index *)
+  | Store_field_int of reg * reg * int  (** base, src, index *)
+  | Store_field_float of reg * reg * int  (** base, src, index *)
+  | Store_field_ptr of reg * reg * int  (** base, src, index *)
+  | Store_array_int of reg * reg * reg  (** base, src, index *)
+  | Store_array_float of reg * reg * reg  (** base, src, index *)
+  | Store_array_ptr of reg * reg * reg  (** base, src, index *)
+  | Store_tag of reg * int  (** base, tag *)
+  | Store_upvar of reg * reg * int  (** closure, src, index *)
+  | Length of reg * reg  (** dst, src *)
+  | Push_handler of int  (** handler_offset *)
+  | Pop_handler
+  | Perform of reg * reg  (** dst, effect_instance *)
   | Nop
   | Halt
