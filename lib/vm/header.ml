@@ -1,18 +1,14 @@
 open Value
 
-(* gc colors *)
+(* for gc *)
 let color_white = 0
 let color_gray = 1
 let color_black = 2
-let color_promoted = 3
+let color_preallocated = 3
 
-(* reserved tags *)
-let no_scan_tag = 0xFA
-let abstract_tag = 0xFB
-let string_tag = 0xFC
-let double_tag = 0xFD
-let forward_tag = 0xFE
-let free_tag = 0xFF
+(* tags *)
+let forward_tag = 0xFA
+let free_tag = 0xFB
 
 let[@inline] make ~size ~color ~tag : word =
   Int64.of_int ((size lsl 10) lor (color lsl 8) lor tag)
@@ -27,6 +23,5 @@ let[@inline] set_color (h : word) c : word =
 let[@inline] set_tag (h : word) t : word =
   Int64.logor (Int64.logand h (Int64.lognot 0xFFL)) (Int64.of_int t)
 
-let[@inline] should_trace (h : word) = tag h < no_scan_tag
 let[@inline] is_forward (h : word) = tag h = forward_tag
 let[@inline] is_free (h : word) = tag h = free_tag

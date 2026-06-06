@@ -5,4 +5,6 @@ type memory = (int64, int64_elt, c_layout) Array1.t
 
 let[@inline] create_memory size : memory = Array1.create int64 c_layout size
 let[@inline] word_of_value n : word = Int64.of_int n
-let[@inline] value_of_word (w : word) : int = Int64.to_int w
+let[@inline] value_of_word (w : word) = Int64.to_int w
+let[@inline] is_ptr (w : word) = Int64.to_int w land 1 = 0
+let[@inline] is_int (w : word) = Int64.to_int w land 1 = 1

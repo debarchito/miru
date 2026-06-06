@@ -9,4 +9,4 @@ type t = {
 }
 
 let create instrs caller ret_reg =
-  { pc = 0; regs = Array.make 256 0L; instrs; caller; ret_reg }
+  { pc = 0; regs = Array.make 256 1L; instrs; caller; ret_reg }
