@@ -9,6 +9,7 @@ bug-reports: "https://todo.sr.ht/~debarchito/miru"
 depends: [
   "dune" {>= "3.22"}
   "ocaml" {>= "5.4.1"}
+  "alcotest" {>= "1.9.1"}
   "odoc" {with-doc}
 ]
 build: [

@@ -51,6 +51,7 @@
 
           basePackagesQuery = {
             ocaml-variants = "5.4.1+options,ocaml-option-flambda";
+            miru-core = "*";
             miru = "*";
           };
 
@@ -67,7 +68,7 @@
         in
         {
           packages = rec {
-            inherit (scope) miru;
+            inherit (scope) miru-core miru;
             default = miru;
           };
 
@@ -86,11 +87,16 @@
 
           overlayAttrs = {
             inherit (scope) miru;
+            ocamlPackages = builtins.attrValues {
+              inherit (scope) miru-core;
+            };
           };
 
           devShells.default = pkgs.mkShell {
             name = "miru-dev";
-            inputsFrom = [ scope.miru ];
+            inputsFrom = builtins.attrValues {
+              inherit (scope) miru-core miru;
+            };
             nativeBuildInputs = devPackages;
           };
         };

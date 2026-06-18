@@ -2,4 +2,5 @@
 
 (library
  (name vm)
- (public_name miru.vm))
+ (public_name miru.vm)
+ (libraries miru-core.memory))

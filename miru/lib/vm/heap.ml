@@ -1,5 +1,5 @@
-open Value
-open Header
+open Memory.Value
+open Memory.Header
 open Bigarray
 
 type chunk = {
@@ -75,7 +75,7 @@ let alloc_chunk (chunk : chunk) ~size ~tag : word option =
     chunk.data.{chunk.free_ptr} <- make ~size ~color:color_white ~tag;
     chunk.free_ptr <- chunk.free_ptr + total;
     chunk.free_words <- chunk.free_words - total;
-    Some (word_of_value global_ptr)
+    Some (word_of_ptr (Int64.of_int global_ptr))
   end
 
 let alloc_major_locked (major : major_heap) ~size ~tag : word =
@@ -113,7 +113,7 @@ let write_barrier (d : minor_heap) (obj_ptr : int) (i : int) (new_val : word) =
     let chunk = find_chunk d.major obj_ptr in
     let hdr = chunk.data.{obj_ptr - chunk.base_address - 1} in
     if color hdr = color_black then begin
-      let val_ptr = value_of_word new_val in
+      let val_ptr = Int64.to_int (ptr_of_word new_val) in
       let val_chunk = find_chunk d.major val_ptr in
       let val_hdr = val_chunk.data.{val_ptr - val_chunk.base_address - 1} in
       if color val_hdr = color_white then begin
@@ -136,12 +136,12 @@ let forward (d : minor_heap) (scan_queue : int Queue.t) ptr : word =
     let sz = size hdr in
     let tg = tag hdr in
     let new_ptr_word = alloc_major_locked d.major ~size:sz ~tag:tg in
-    let dst = value_of_word new_ptr_word in
+    let dst = Int64.to_int (ptr_of_word new_ptr_word) in
     let chunk = find_chunk d.major dst in
     for i = 0 to sz - 1 do
       chunk.data.{dst - chunk.base_address + i} <- d.minor.{ptr + i}
     done;
-    d.minor.{ptr - 1} <- set_tag d.minor.{ptr - 1} forward_tag;
+    d.minor.{ptr - 1} <- set_tag d.minor.{ptr - 1} tag_forward;
     d.minor.{ptr} <- new_ptr_word;
     d.promoted_words <- d.promoted_words + sz + 1;
     Queue.push dst scan_queue;
@@ -155,7 +155,7 @@ let scan_block (d : minor_heap) (scan_queue : int Queue.t) major_ptr =
   for i = 0 to sz - 1 do
     let w = chunk.data.{major_ptr - chunk.base_address + i} in
     if is_ptr w then begin
-      let p = value_of_word w in
+      let p = Int64.to_int (ptr_of_word w) in
       if p >= 0 && p < d.minor_size then
         write_field d.major major_ptr i (forward d scan_queue p)
     end
@@ -170,7 +170,7 @@ let minor_gc (d : minor_heap) =
         Array.iteri
           (fun i w ->
             if is_ptr w then begin
-              let ptr = value_of_word w in
+              let ptr = Int64.to_int (ptr_of_word w) in
               if ptr >= 0 && ptr < d.minor_size then
                 r.values.(i) <- forward d scan_queue ptr
             end)
@@ -183,7 +183,7 @@ let minor_gc (d : minor_heap) =
       let chunk = find_chunk d.major field_addr in
       let w = chunk.data.{field_addr - chunk.base_address} in
       if is_ptr w then begin
-        let p = value_of_word w in
+        let p = Int64.to_int (ptr_of_word w) in
         if p >= 0 && p < d.minor_size then
           chunk.data.{field_addr - chunk.base_address} <- forward d scan_queue p
       end)
@@ -215,7 +215,7 @@ let mark_slice (major : major_heap) budget =
     chunk.data.{ptr - chunk.base_address - 1} <- set_color hdr color_black;
     for i = 0 to sz - 1 do
       let w = chunk.data.{ptr - chunk.base_address + i} in
-      if is_ptr w then mark_gray major (value_of_word w)
+      if is_ptr w then mark_gray major (Int64.to_int (ptr_of_word w))
     done;
     remaining := !remaining - sz - 1
   done
@@ -227,7 +227,8 @@ let sweep_chunk (chunk : chunk) =
     let sz = size hdr in
     let total = sz + 1 in
     if color hdr = color_white then begin
-      chunk.data.{!i} <- make ~size:sz ~color:color_white ~tag:free_tag;
+      chunk.data.{!i} <- make ~size:sz ~color:color_white ~tag:0;
+      (* FIX: THIS NEEDS TO BE FIXED! *)
       for j = 1 to sz do
         chunk.data.{!i + j} <- 0L
       done;
@@ -243,7 +244,8 @@ let major_gc (major : major_heap) (roots : root option list) =
     | None -> ()
     | Some r ->
         Array.iter
-          (fun w -> if is_ptr w then mark_gray major (value_of_word w))
+          (fun w ->
+            if is_ptr w then mark_gray major (Int64.to_int (ptr_of_word w)))
           r.values;
         mark_roots r.next
   in
@@ -275,12 +277,12 @@ let alloc (d : minor_heap) ~size ~tag : word =
       else begin
         d.minor.{new_ptr2} <- make ~size ~color:color_white ~tag;
         d.young_ptr <- new_ptr2;
-        word_of_value (new_ptr2 + 1)
+        word_of_ptr (Int64.of_int (new_ptr2 + 1))
       end
     end
     else begin
       d.minor.{new_ptr} <- make ~size ~color:color_white ~tag;
       d.young_ptr <- new_ptr;
-      word_of_value (new_ptr + 1)
+      word_of_ptr (Int64.of_int (new_ptr + 1))
     end
   end

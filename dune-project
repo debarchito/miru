@@ -18,7 +18,9 @@
  (description "Miru's core library")
  (depends
   (ocaml
-   (>= "5.4.1")))
+   (>= "5.4.1"))
+  (alcotest
+   (>= "1.9.1")))
  (tags
   ("miru-core" "miru")))
 
@@ -30,5 +32,7 @@
   (ocaml
    (>= "5.4.1"))
   (miru-core
-   (= :version)))
+   (= :version))
+  (alcotest
+   (>= "1.9.1")))
  (tags ("miru")))
