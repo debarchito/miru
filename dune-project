@@ -1,23 +1,23 @@
 (lang dune 3.22)
 
-(name sirome)
+(name miru)
 
 (generate_opam_files true)
 
 (cram enable)
 
 (source
- (sourcehut debarchito/sirome))
+ (sourcehut debarchito/miru))
 
 (authors "Debarchito Nath <debarchiton@proton.me>")
 
 (maintainers "Debarchito Nath <debarchiton@proton.me>")
 
 (package
- (name sirome)
- (synopsis "My opinionated take on a Clojure-esque Lisp with ML schematics")
- (description "My opinionated take on a Clojure-esque Lisp with ML schematics")
+ (name miru)
+ (synopsis "My take on a specialized statically typed Lisp+ML hybrid")
+ (description "My take on a specialized statically typed Lisp+ML hybrid")
  (depends
-  (ocaml (>= "5.4.1")))
- (tags
-  ("sirome")))
+  (ocaml
+   (>= "5.4.1")))
+ (tags ("miru")))

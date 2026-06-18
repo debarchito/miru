@@ -1,3 +1,3 @@
 ## Licensing
 
-Sirome is licensed under [GNU GPL 3.0 Only](./LICENSE).
+Miru is licensed under [GPLv3-only](./LICENSE).

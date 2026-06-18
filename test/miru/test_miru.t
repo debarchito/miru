@@ -1,4 +1,4 @@
 First test
 
-  $ sirome
+  $ miru
   2 + 2 = 4

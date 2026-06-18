@@ -51,7 +51,7 @@
 
           basePackagesQuery = {
             ocaml-variants = "5.4.1+options,ocaml-option-flambda";
-            sirome = "*";
+            miru = "*";
           };
 
           devPackagesQuery = {
@@ -67,8 +67,8 @@
         in
         {
           packages = rec {
-            inherit (scope) sirome;
-            default = sirome;
+            inherit (scope) miru;
+            default = miru;
           };
 
           treefmt = {
@@ -85,12 +85,12 @@
           };
 
           overlayAttrs = {
-            inherit (scope) sirome;
+            inherit (scope) miru;
           };
 
           devShells.default = pkgs.mkShell {
-            name = "sirome-dev";
-            inputsFrom = [ scope.sirome ];
+            name = "miru-dev";
+            inputsFrom = [ scope.miru ];
             nativeBuildInputs = devPackages;
           };
         };
