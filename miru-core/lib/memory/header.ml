@@ -1,6 +1,6 @@
 open Value
 
-(** This module defines a 64-bit object metadata header. Bits 0-7 store an 8-bit
+(** This module defines a 64-bit metadata header. Bits 0-7 store an 8-bit
     semantic type tag, bits 8-9 track a 2-bit tricolor GC color, and the
     remaining 54-bits track allocation size (word size). *)
 
