@@ -3,4 +3,4 @@
 (library
  (name vm)
  (public_name miru.vm)
- (libraries miru-core.memory))
+ (libraries miru-core.repr))

@@ -1,9 +1,9 @@
 (test
- (name test_memory_value)
+ (name test_repr_value)
  (package miru-core)
- (libraries miru-core.memory alcotest))
+ (libraries miru-core.repr alcotest))
 
 (test
- (name test_memory_header)
+ (name test_repr_header)
  (package miru-core)
- (libraries miru-core.memory alcotest))
+ (libraries miru-core.repr alcotest))

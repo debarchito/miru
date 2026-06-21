@@ -1,4 +1,4 @@
-open Memory.Value
+open Repr.Value
 
 let max_i = Int64.to_int 0x3FFFFFFFFFFFFFFFL
 let min_i = Int64.to_int (-0x4000000000000000L)

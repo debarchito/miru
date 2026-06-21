@@ -2,4 +2,5 @@
 
 (library
  (name memory)
- (public_name miru-core.memory))
+ (public_name miru-core.memory)
+ (libraries miru-core.repr))

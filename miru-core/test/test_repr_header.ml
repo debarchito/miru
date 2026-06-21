@@ -1,4 +1,4 @@
-open Memory.Header
+open Repr.Header
 
 let max_size = 0x3FFFFFFFFFFFFFL
 let max_size_int = Int64.to_int max_size
