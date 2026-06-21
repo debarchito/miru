@@ -12,13 +12,12 @@ let rec equal_form a b =
   | F.String a, F.String b -> a = b
   | F.Symbol a, F.Symbol b -> a = b
   | F.List a, F.List b -> equal_lists a b
-  | F.Tuple a, F.Tuple b -> equal_lists a b
   | F.RecordExpression a, F.RecordExpression b ->
       List.length a = List.length b
       && List.for_all2
            (fun (k1, v1) (k2, v2) -> equal_form k1 k2 && equal_form v1 v2)
            a b
-  | F.Field a, F.Field b -> a = b
+  | F.Field a, F.Field b -> equal_form a b
   | F.MutableField a, F.MutableField b -> a = b
   | F.Type a, F.Type b -> equal_form a b
   | F.TypeApplication (s1, a1), F.TypeApplication (s2, a2) ->
@@ -144,12 +143,15 @@ let test_list_symbols () =
 
 let test_tuple_empty () =
   let forms = parse "[]" in
-  check_form "empty tuple" [ F.Tuple [] ] forms
+  check_form "empty tuple" [ F.RecordExpression [] ] forms
 
 let test_tuple_basic () =
   let forms = parse "[1 2 \"name\"]" in
   check_form "basic tuple"
-    [ F.Tuple [ F.Int 1L; F.Int 2L; F.String "name" ] ]
+    [ F.RecordExpression
+        [ (F.Field (F.Int 0L), F.Int 1L);
+          (F.Field (F.Int 1L), F.Int 2L);
+          (F.Field (F.Int 2L), F.String "name") ] ]
     forms
 
 (* --- Structs --- *)
@@ -164,7 +166,7 @@ let test_struct_basic () =
     [
       F.RecordExpression
         [
-          (F.Field "key1", F.String "value"); (F.Field "key2", F.String "value2");
+          (F.Field (F.Symbol "key1"), F.String "value"); (F.Field (F.Symbol "key2"), F.String "value2");
         ];
     ]
     forms
@@ -217,7 +219,10 @@ let test_discard_in_list () =
 
 let test_discard_in_tuple () =
   let forms = parse "[1 #_ 2 3]" in
-  check_form "discard in tuple" [ F.Tuple [ F.Int 1L; F.Int 3L ] ] forms
+  check_form "discard in tuple"
+    [ F.RecordExpression
+        [ (F.Field (F.Int 0L), F.Int 1L); (F.Field (F.Int 1L), F.Int 3L) ] ]
+    forms
 
 let test_discard_double_in_list () =
   let forms = parse "(1 #_ 2 #_ 3 4)" in
@@ -229,7 +234,7 @@ let test_undefined_dispatch () =
   try
     ignore (parse "#a[1 2 3]");
     Alcotest.fail "expected failure for undefined # dispatch"
-  with Failure _ -> ()
+  with Reader.Err.Reader_error _ -> ()
 
 (* --- Invalid # dispatch errors --- *)
 
@@ -297,13 +302,13 @@ let test_unclosed_paren () =
   try
     ignore (parse "(1 2");
     Alcotest.fail "expected failure for unclosed paren"
-  with Failure _ -> ()
+  with Reader.Err.Reader_error _ -> ()
 
 let test_unclosed_string () =
   try
     ignore (parse "\"hello");
     Alcotest.fail "expected failure for unclosed string"
-  with Failure _ -> ()
+  with Reader.Err.Reader_error _ -> ()
 
 let tests =
   [

@@ -19,10 +19,23 @@
  (depends
   (ocaml
    (>= "5.4.1"))
+  (asai
+   (>= "0.3.1"))
   (alcotest
    (>= "1.9.1")))
  (tags
   ("miru-core" "miru")))
+
+(package
+ (name miru-repl)
+ (description "Miru's interactive REPL")
+ (depends
+  (ocaml
+   (>= "5.4.1"))
+  (miru
+   (= :version)))
+ (tags
+  ("miru-repl" "miru")))
 
 (package
  (name miru)
@@ -33,6 +46,8 @@
    (>= "5.4.1"))
   (miru-core
    (= :version))
+  (asai
+   (>= "0.3.1"))
   (alcotest
    (>= "1.9.1")))
  (tags ("miru")))

@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (public_name miru-repl)
+ (package miru-repl)
+ (libraries miru-repl.repl))

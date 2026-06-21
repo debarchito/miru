@@ -11,6 +11,7 @@ depends: [
   "dune" {>= "3.22"}
   "ocaml" {>= "5.4.1"}
   "miru-core" {= version}
+  "asai" {>= "0.3.1"}
   "alcotest" {>= "1.9.1"}
   "odoc" {with-doc}
 ]

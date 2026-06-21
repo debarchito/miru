@@ -8,10 +8,20 @@ module Stream = struct
     mutable pos : int;
     mutable line : int;
     mutable col : int;
+    mutable sol : int;
+    source : Span.source option;
   }
 
-  let from_string s =
-    { input = s; len = String.length s; pos = 0; line = 1; col = 0 }
+  let from_string ?source s =
+    {
+      input = s;
+      len = String.length s;
+      pos = 0;
+      line = 1;
+      col = 0;
+      sol = 0;
+      source;
+    }
 
   let peek s = if s.pos >= s.len then None else Some (String.get s.input s.pos)
 
@@ -26,11 +36,29 @@ module Stream = struct
       s.pos <- s.pos + 1;
       if c = '\n' then (
         s.line <- s.line + 1;
-        s.col <- 0)
+        s.col <- 0;
+        s.sol <- s.pos)
       else s.col <- s.col + 1;
       c
 
   let pos s = (s.pos, s.line, s.col)
+
+  let capture s =
+    (s.pos, s.line, s.col, s.sol)
+
+  let point_range s ~offset ~line_num ~start_of_line =
+    match s.source with
+    | Some src ->
+        let p : Asai.Range.position =
+          { source = src; offset; line_num; start_of_line }
+        in
+        Some (Asai.Range.make (p, p))
+    | None -> None
+
+  let current_point_range s = point_range s ~offset:s.pos ~line_num:s.line ~start_of_line:s.sol
+
+  let captured_point_range s (pos, _, _, sol) =
+    point_range s ~offset:pos ~line_num:s.line ~start_of_line:sol
 
   let skip_while s f =
     let rec loop () =
@@ -112,18 +140,35 @@ let read_escape s =
   | '\'' -> '\''
   | 'x' ->
       let c1 =
+        let cap = Stream.capture s in
         match Stream.read s with
         | c when is_hex_digit c -> hex_val c
-        | _ -> failwith "Reader: invalid hex escape"
+        | _ ->
+            raise
+              (Err.Reader_error
+                 ( Stream.captured_point_range s cap,
+                   Err.Message.InvalidHexEscape,
+                   "invalid hex escape" ))
       in
       let c2 =
+        let cap = Stream.capture s in
         match Stream.read s with
         | c when is_hex_digit c -> hex_val c
-        | _ -> failwith "Reader: invalid hex escape"
+        | _ ->
+            raise
+              (Err.Reader_error
+                 ( Stream.captured_point_range s cap,
+                   Err.Message.InvalidHexEscape,
+                   "invalid hex escape" ))
       in
       Char.chr ((c1 * 16) + c2)
   | c -> c
-  | exception End_of_input -> failwith "Reader: unterminated string escape"
+  | exception End_of_input ->
+      raise
+        (Err.Reader_error
+           ( Stream.current_point_range s,
+             Err.Message.UnterminatedStringEscape,
+             "unterminated string escape" ))
 
 let read_string_body s =
   let buf = Buffer.create 64 in
@@ -137,9 +182,11 @@ let read_string_body s =
         Buffer.add_char buf c;
         loop ()
     | exception End_of_input ->
-        let _, line, col = Stream.pos s in
-        failwith
-          (Printf.sprintf "Reader: unterminated string at %d:%d" line col)
+        raise
+          (Err.Reader_error
+             ( Stream.current_point_range s,
+               Err.Message.UnterminatedString,
+               "unterminated string" ))
   in
   loop ()
 
@@ -270,10 +317,11 @@ let read_token s first =
   else if first = '.' && peek_digit then read_number s first
   else if is_symbol_start first then read_symbol s first
   else
-    let _, line, col = Stream.pos s in
-    failwith
-      (Printf.sprintf "Reader: unexpected character '%c' at %d:%d" first line
-         col)
+    raise
+      (Err.Reader_error
+         ( Stream.current_point_range s,
+           Err.Message.UnexpectedCharacter,
+           Printf.sprintf "unexpected character '%c'" first ))
 
 let rec read_form rt s =
   skip_whitespace s;
@@ -297,11 +345,12 @@ and read_forms_until rt s close =
   skip_whitespace s;
   match Stream.peek s with
   | None ->
-      let _, line, col = Stream.pos s in
-      failwith
-        (Printf.sprintf
-           "Reader: unexpected EOF while reading form (expecting '%c') at %d:%d"
-           close line col)
+      raise
+        (Err.Reader_error
+           ( Stream.current_point_range s,
+             Err.Message.UnexpectedEOF,
+             Printf.sprintf "unexpected EOF while reading form (expecting '%c')"
+               close ))
   | Some c when c = close ->
       Stream.read s |> ignore;
       []
@@ -334,12 +383,11 @@ and read_list_macro rt s _ =
   read_type_form forms
 
 and read_type_form =
+  let is_positional = function
+    | (Form.Field (Form.Int _), _) :: _ -> true
+    | _ -> false
+  in
   let rec wrap_type = function
-    | Form.Tuple items ->
-        Form.RecordExpression
-          (List.mapi
-             (fun i v -> (Form.Field (string_of_int i), wrap_type v))
-             items)
     | Form.RecordExpression pairs ->
         Form.RecordExpression (List.map (fun (k, v) -> (k, wrap_type v)) pairs)
     | Form.List items -> (
@@ -357,12 +405,16 @@ and read_type_form =
   in
   function
   | [ Form.Symbol "type"; Form.Symbol name; Form.RecordExpression fields ] ->
-      Form.Record
-        ( name,
-          Form.RecordExpression
-            (List.map (fun (k, v) -> (k, wrap_type v)) fields) )
-  | [ Form.Symbol "type"; Form.Symbol name; Form.Tuple types ] ->
-      Form.AbstractType (name, Form.Tuple (List.map wrap_type types))
+      if is_positional fields then
+        Form.AbstractType
+          ( name,
+            Form.RecordExpression
+              (List.map (fun (k, v) -> (k, wrap_type v)) fields) )
+      else
+        Form.Record
+          ( name,
+            Form.RecordExpression
+              (List.map (fun (k, v) -> (k, wrap_type v)) fields) )
   | Form.Symbol "type" :: Form.Symbol name :: constructors -> (
       match constructors with
       | [ single ] -> (
@@ -403,35 +455,87 @@ and read_type_form =
           Form.Variant (name, process_ctors [] constructors))
   | forms -> Form.List forms
 
-and read_tuple_macro rt s _ = Form.Tuple (read_forms_until rt s ']')
+and read_tuple_macro rt s _ =
+  let items = read_forms_until rt s ']' in
+  Form.RecordExpression
+    (List.mapi
+       (fun i v -> (Form.Field (Form.Int (Int64.of_int i)), v))
+       items)
 
 and read_struct_macro rt s _ =
-  let forms = read_forms_until rt s '}' in
-  let rec process_mutable = function
-    | Form.Symbol "mutable" :: rest -> (
-        match rest with
-        | [] -> [ Form.Symbol "mutable" ]
-        | Form.Symbol x :: xs -> Form.MutableField x :: process_mutable xs
-        | x :: xs -> Form.MutableField "" :: process_mutable xs)
-    | x :: xs -> x :: process_mutable xs
+  (* Read body forms with captured stream positions so error spans point to
+     the offending key, not past the closing '}'. *)
+  let rec read_forms acc =
+    skip_whitespace s;
+    match Stream.peek s with
+    | None ->
+        raise
+          (Err.Reader_error
+             ( Stream.current_point_range s,
+               Err.Message.UnexpectedEOF,
+               "unexpected EOF while reading struct body (expecting '}')" ))
+    | Some '}' ->
+        Stream.read s |> ignore;
+        List.rev acc
+    | Some _ ->
+        let cap = Stream.capture s in
+        let span = Stream.captured_point_range s cap in
+        (match (try Some (read_form rt s) with Discard -> None) with
+        | None -> read_forms acc
+        | Some f -> read_forms ((span, f) :: acc))
+  in
+  let rec resolve_mutable = function
+    | (_, Form.Symbol "mutable") :: (span, Form.Symbol x) :: rest ->
+        (span, Form.MutableField x) :: resolve_mutable rest
+    | (_, Form.Symbol "mutable") :: (span, Form.Int k) :: rest ->
+        (span, Form.MutableField (Int64.to_string k)) :: resolve_mutable rest
+    | (_, Form.Symbol "mutable") :: (span, Form.String _) :: _ ->
+        raise
+          (Err.Reader_error
+             ( span,
+               Err.Message.InvalidMutableFieldKey,
+               "mutable field keys must be symbols or integers, got string" ))
+    | (_, Form.Symbol "mutable") :: (span, _) :: _ ->
+        raise
+          (Err.Reader_error
+             ( span,
+               Err.Message.InvalidMutableFieldKey,
+               "mutable field keys must be symbols or integers, got other" ))
+    | (_, Form.Symbol "mutable") :: [] -> []
+    | x :: rest -> x :: resolve_mutable rest
     | [] -> []
   in
-  let forms = process_mutable forms in
+  let forms = resolve_mutable (read_forms []) in
   let rec pair acc = function
-    | [] -> List.rev acc
-    | [ k ] ->
-        let _, line, col = Stream.pos s in
-        failwith
-          (Printf.sprintf "Reader: struct body has odd number of forms at %d:%d"
-             line col)
-    | Form.Symbol k :: v :: rest -> pair ((Form.Field k, v) :: acc) rest
-    | k :: v :: rest -> pair ((k, v) :: acc) rest
+    | [] -> Form.RecordExpression (List.rev acc)
+    | [ (_, Form.Symbol "mutable") ] -> Form.RecordExpression (List.rev acc)
+    | [ (span, _) ] ->
+        raise
+          (Err.Reader_error
+             ( span,
+               Err.Message.OddStructBody,
+               "struct body has odd number of forms" ))
+    | (_, Form.Symbol k) :: (_, v) :: rest ->
+        pair ((Form.Field (Form.Symbol k), v) :: acc) rest
+    | (_, Form.Int k) :: (_, v) :: rest ->
+        pair ((Form.Field (Form.Int k), v) :: acc) rest
+    | (_, (Form.MutableField _ as k)) :: (_, v) :: rest ->
+        pair ((k, v) :: acc) rest
+    | (span, _) :: _ :: _ ->
+        raise
+          (Err.Reader_error
+             ( span,
+               Err.Message.InvalidFieldKey,
+               "struct field keys must be symbols or integers" ))
   in
-  Form.RecordExpression (pair [] forms)
+  pair [] forms
 
 and read_close_error s c =
-  let _, line, col = Stream.pos s in
-  failwith (Printf.sprintf "Reader: unexpected '%c' at %d:%d" c line col)
+  raise
+    (Err.Reader_error
+       ( Stream.current_point_range s,
+         Err.Message.UnexpectedClose,
+         Printf.sprintf "unexpected '%c'" c ))
 
 and read_dispatch_macro rt s _ =
   match Stream.read s with
@@ -439,10 +543,11 @@ and read_dispatch_macro rt s _ =
       begin match Hashtbl.find_opt rt.dispatch c with
       | Some fn -> fn rt s c
       | None ->
-          let _, line, col = Stream.pos s in
-          failwith
-            (Printf.sprintf "Reader: undefined # dispatch '%c' at %d:%d" c line
-               col)
+          raise
+            (Err.Reader_error
+               ( Stream.current_point_range s,
+                 Err.Message.UndefinedDispatch,
+                 Printf.sprintf "undefined # dispatch '%c'" c ))
       end
 
 and read_fn_dispatch rt s _ = Form.Fn (read_forms_until rt s ')')
@@ -496,3 +601,21 @@ let read_all ?(rt = default ()) input =
      done
    with End_of_input -> ());
   List.rev !forms
+
+let read_all_reported ?(rt = default ()) ~title input =
+  let source = Span.source_of_string ~source_title:title input in
+  let s = Stream.from_string ~source input in
+  let module Term = Asai.Tty.Make (Err.Message) in
+  Err.run
+    ~emit:Term.display
+    ~fatal:(fun d -> Term.display d; exit 1)
+    @@ fun () ->
+    let forms = ref [] in
+    (try
+       while true do
+         try forms := read_form rt s :: !forms with Discard -> ()
+       done
+     with End_of_input -> ()
+     | Err.Reader_error (span_opt, msg, detail) ->
+         Err.fatal ?loc:span_opt ~severity:Asai.Diagnostic.Error msg detail);
+    List.rev !forms

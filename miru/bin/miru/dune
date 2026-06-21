@@ -2,4 +2,4 @@
  (name main)
  (public_name miru)
  (package miru)
- (libraries miru.vm miru.reader unix))
+ (libraries miru.vm miru.reader))

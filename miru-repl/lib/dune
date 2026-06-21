@@ -1,0 +1,4 @@
+(library
+ (name repl)
+ (public_name miru-repl.repl)
+ (libraries miru.reader unix))

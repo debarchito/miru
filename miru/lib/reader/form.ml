@@ -6,7 +6,6 @@ type t =
   | String of string
   | Symbol of string
   | List of t list
-  | Tuple of t list
   | RecordExpression of (t * t) list
   | Record of string * t
   | Constructor of string * t option
@@ -18,7 +17,7 @@ type t =
   | Quasiquote of t
   | Unquote of t
   | Splice of t
-  | Field of string
+  | Field of t
   | MutableField of string
   | Type of t
   | TypeApplication of string * t
