@@ -8,10 +8,10 @@ let source_of_file path = Asai.Range.(`File path)
 
 let source_of_string ?source_title content =
   let ttl = source_title in
-  Asai.Range.(`String { title = ttl; content })
+  Asai.Range.(`String {title= ttl; content})
 
 let make_position ~src ~offset ~line_num ~start_of_line =
-  Asai.Range.{ source = src; offset; line_num; start_of_line }
+  Asai.Range.{source= src; offset; line_num; start_of_line}
 
 let make_range start_pos end_pos = Asai.Range.make (start_pos, end_pos)
 

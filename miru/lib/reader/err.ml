@@ -14,16 +14,26 @@ module Message = struct
   let default_severity _ = Asai.Diagnostic.Error
 
   let short_code = function
-    | UnterminatedString -> "E001"
-    | UnterminatedStringEscape -> "E002"
-    | InvalidHexEscape -> "E003"
-    | UnexpectedCharacter -> "E004"
-    | UnexpectedEOF -> "E005"
-    | UnexpectedClose -> "E006"
-    | UndefinedDispatch -> "E007"
-    | OddStructBody -> "E008"
-    | InvalidFieldKey -> "E009"
-    | InvalidMutableFieldKey -> "E010"
+    | UnterminatedString ->
+        "E001"
+    | UnterminatedStringEscape ->
+        "E002"
+    | InvalidHexEscape ->
+        "E003"
+    | UnexpectedCharacter ->
+        "E004"
+    | UnexpectedEOF ->
+        "E005"
+    | UnexpectedClose ->
+        "E006"
+    | UndefinedDispatch ->
+        "E007"
+    | OddStructBody ->
+        "E008"
+    | InvalidFieldKey ->
+        "E009"
+    | InvalidMutableFieldKey ->
+        "E010"
 end
 
 include Asai.Reporter.Make (Message)
