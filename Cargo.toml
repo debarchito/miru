@@ -1,0 +1,8 @@
+[workspace]
+members = ["miru-rtl"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Debarchito Nath <debarchiton@proton.me>"]
+edition = "2024"

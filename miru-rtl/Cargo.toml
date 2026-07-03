@@ -1,0 +1,10 @@
+[package]
+name = "miru-rtl"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+ocaml-interop = "0.12.0"
