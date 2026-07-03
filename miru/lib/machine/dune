@@ -1,0 +1,36 @@
+(library
+ (name machine_stubs)
+ (public_name miru.machine)
+ (modes native)
+ (no_dynlink)
+ (foreign_archives miru_machine)
+ (c_library_flags -lpthread -ldl))
+
+(rule
+ (targets libmiru_machine.a)
+ (enabled_if
+  (= %{env:IS_NIX_BUILD_ENV=false} false))
+ (deps
+  (source_tree %{project_root}/miru-machine/src)
+  %{project_root}/miru-machine/Cargo.toml)
+ (action
+  (run
+   dune-cargo-build
+   %{project_root}/miru-machine/Cargo.toml
+   .
+   --profile
+   release
+   --workspace-root
+   %{workspace_root}
+   --
+   -p
+   miru-machine)))
+
+(rule
+ (targets libmiru_machine.a)
+ (enabled_if
+  (= %{env:IS_NIX_BUILD_ENV=false} true))
+ (action
+  (copy
+   %{env:MIRU_machine_DIR=unbothered_placeholder}/lib/libmiru_machine.a
+   libmiru_machine.a)))

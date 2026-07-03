@@ -1,6 +1,0 @@
-(include_subdirs qualified)
-
-(library
- (name vm)
- (public_name miru.vm)
- (libraries miru-core.repr))

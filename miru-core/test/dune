@@ -1,9 +1,0 @@
-(test
- (name test_repr_value)
- (package miru-core)
- (libraries miru-core.repr alcotest))
-
-(test
- (name test_repr_header)
- (package miru-core)
- (libraries miru-core.repr alcotest))

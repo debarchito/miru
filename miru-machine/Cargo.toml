@@ -1,0 +1,11 @@
+[package]
+name = "miru-machine"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+ocaml-interop = "0.12.0"

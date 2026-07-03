@@ -18,16 +18,18 @@ and the cover language. The base language is a reduced form which contains a
 very small set of features which, the rest of the language is bootstrapped
 around (hence the name "cover"; the term is derived from topological covers).
 
-## 2. Get started!
+## 2. What are the components?
 
-> NOTE: A major migration is under-way. The original memory representation
-> primitives were written as an OCaml-library. But, I've decided to port the RTL
-> (runtime library) to Rust and use OCaml for the lowering pipeline and bytecode
-> construction. Thus, the register machine will also be implemented in Rust for
-> more control over performance and memory allocation. I've already migrated
-> [flake.nix](/flake.nix) to support the Rust-to-OCaml FFI scenario starting
-> with the [miru-rtl](/miru-rtl) library. It was very complicated but I ended up
-> with conditional compilation staging that worked wonders for me.
+> NOTE: All components are not yet complete.
+
+- [miru-rtl](/miru-rtl) or Miru runtime library is written in Rust. It is built
+  to be embedable.
+- [miru](/miru) holds the lowering tools (source -> bytecode, and source ->
+  assembly in future), macro engine, type checker, etc. all written in OCaml.
+- [miru-machine](/miru-machine) is the register machine written in Rust. This
+  also powers the macro engine and is bridged to OCaml.
+
+## 3. Get started!
 
 It's a fresh project with lots of aspirations. I want to take my time and
 implement things mindfully. This means a lot of experimentation and what could
@@ -51,20 +53,6 @@ nix run sourcehut:~debarchito/miru#miru-repl
 I'll attach a document explaining the syntax in the upcoming days, so you have a
 reference to evaluate the REPL against.
 
-## 3. What's happening right now?
-
-> NOTE: `miru-core` will be removed in favor of `miru-rtl` and the
-> `Miru_rtl_bridge.Rtl` bindings.
-
-- Uniform representation and header layout. See
-  [miru-core/lib/repr](./miru-core/lib/repr).
-- Generational heap. See [miru-core/lib/memory](./miru-core/lib/memory).
-- Reader, readtables and reader macros. See
-  [miru/lib/reader](./miru/lib/reader).
-- Register machine ISA. See [miru/lib/vm](./miru/lib/vm).
-- A rudimentary REPL (reader expansion only) with nice error reporting. See
-  [miru-repl/lib](./miru-repl/lib).
-
-## 4. Licensing.
+## 5. Licensing.
 
 Miru is licensed under [GPLv3-only](./LICENSE).

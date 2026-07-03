@@ -1,5 +1,7 @@
 type reg = Reg of int [@@unboxed] [@@immediate64]
+
 type func_id = Func_id of int [@@unboxed] [@@immediate64]
+
 type prim_id = Prim_id of int [@@unboxed] [@@immediate64]
 
 type t =
@@ -57,6 +59,7 @@ type t =
   | Tail_call_closure of reg * reg * int  (** callee, args_base, nargs *)
   | Ret of reg  (** src *)
   | Alloc of reg * int  (** dst, nfields *)
+  | Alloc_closure of reg * func_id * int  (** dst, callee, nfields *)
   | Alloc_array of reg * reg  (** dst, nfields_reg *)
   | Load_byte of reg * reg * reg  (** dst, base, index *)
   | Load_field_int of reg * reg * int  (** dst, base, index *)

@@ -1,5 +1,5 @@
 [workspace]
-members = ["miru-rtl"]
+members = ["miru-rtl", "miru-machine"]
 resolver = "2"
 
 [workspace.package]

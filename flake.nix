@@ -68,7 +68,6 @@
 
           ocamlBasePackagesQuery = {
             ocaml-variants = "5.4.1+options,ocaml-option-flambda";
-            miru-core = "*";
             miru = "*";
             miru-repl = "*";
           };
@@ -83,32 +82,32 @@
 
           ocamlCompiler = ocamlBaseScope.ocaml-compiler;
 
-          miruRtlCommonArgs = {
-            pname = "miru-rtl";
+          miruMachineCommonArgs = {
+            pname = "miru-machine";
             version = "0.1.0";
-            cargoExtraArgs = "-p miru-rtl";
+            cargoExtraArgs = "-p miru-machine";
             src = rustSrc;
             strictDeps = true;
             nativeBuildInputs = [ ocamlCompiler ];
           };
-          miruRtlCargoArtifacts = craneLib.buildDepsOnly miruRtlCommonArgs;
+          miruMachineCargoArtifacts = craneLib.buildDepsOnly miruMachineCommonArgs;
 
-          miru-rtl = craneLib.buildPackage (
-            miruRtlCommonArgs
+          miru-machine = craneLib.buildPackage (
+            miruMachineCommonArgs
             // {
-              cargoArtifacts = miruRtlCargoArtifacts;
+              cargoArtifacts = miruMachineCargoArtifacts;
             }
           );
 
           ocamlScope = ocamlBaseScope.overrideScope (
             _: prev: {
-              inherit miru-rtl;
+              inherit miru-machine;
 
               miru = prev.miru.overrideAttrs (oldAttrs: {
-                propagatedBuildInputs = (oldAttrs.propagatedBuildInputs or [ ]) ++ [ miru-rtl ];
+                propagatedBuildInputs = (oldAttrs.propagatedBuildInputs or [ ]) ++ [ miru-machine ];
 
                 IS_NIX_BUILD_ENV = "true";
-                MIRU_RTL_DIR = "${miru-rtl}";
+                MIRU_machine_DIR = "${miru-machine}";
               });
             }
           );
@@ -121,7 +120,6 @@
         in
         {
           packages = rec {
-            inherit miru-rtl;
             inherit (ocamlScope) miru miru-repl;
             default = miru;
           };
@@ -144,26 +142,26 @@
           };
 
           checks = {
-            inherit miru-rtl;
+            inherit miru-machine;
 
-            miru-rtl-clippy = craneLib.cargoClippy (
-              miruRtlCommonArgs
+            miru-machine-clippy = craneLib.cargoClippy (
+              miruMachineCommonArgs
               // {
-                cargoArtifacts = miruRtlCargoArtifacts;
+                cargoArtifacts = miruMachineCargoArtifacts;
                 cargoClippyExtraArgs = "--all-targets -- --deny warnings";
               }
             );
 
-            miru-rtl-fmt = craneLib.cargoFmt { src = rustSrc; };
+            miru-machine-fmt = craneLib.cargoFmt { src = rustSrc; };
 
-            miru-rtl-audit = craneLib.cargoAudit {
+            miru-machine-audit = craneLib.cargoAudit {
               src = rustSrc;
               inherit advisory-db;
             };
           };
 
           overlayAttrs = {
-            inherit miru-rtl;
+            inherit miru-machine;
             inherit (ocamlScope) miru miru-repl;
           };
 
@@ -171,8 +169,8 @@
             name = "miru-dev";
 
             inputsFrom = builtins.attrValues {
-              inherit miru-rtl;
-              inherit (ocamlScope) miru-core miru miru-repl;
+              inherit miru-machine;
+              inherit (ocamlScope) miru miru-repl;
             };
             nativeBuildInputs = devPackages;
 

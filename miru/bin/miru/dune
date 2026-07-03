@@ -2,4 +2,4 @@
  (name main)
  (public_name miru)
  (package miru)
- (libraries threads miru.rtl))
+ (libraries threads miru.machine))

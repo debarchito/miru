@@ -1,4 +1,4 @@
-open Miru_rtl_bridge.Rtl
+open Machine_stubs.Machine
 
 let () =
   let input = 5L in
