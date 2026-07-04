@@ -2,3 +2,4 @@
 _build
 result
 target
+*.install

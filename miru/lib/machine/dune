@@ -6,6 +6,9 @@
  (foreign_archives miru_machine)
  (c_library_flags -lpthread -ldl))
 
+;; when using dune outside the Nix sandbox, invoke cargo to build
+;; the static object.
+
 (rule
  (targets libmiru_machine.a)
  (enabled_if
@@ -26,11 +29,14 @@
    -p
    miru-machine)))
 
+;; when using crane inside the Nix sandbox, use the static object
+;; prepared by crane.
+
 (rule
  (targets libmiru_machine.a)
  (enabled_if
   (= %{env:IS_NIX_BUILD_ENV=false} true))
  (action
   (copy
-   %{env:MIRU_machine_DIR=unbothered_placeholder}/lib/libmiru_machine.a
+   %{env:CRANE_MIRU_MACHINE_DIR=/this/is/an/easter/egg}/lib/libmiru_machine.a
    libmiru_machine.a)))

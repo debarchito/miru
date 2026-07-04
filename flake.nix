@@ -60,12 +60,12 @@
             overlays = [ (import rust-overlay) ];
           };
 
+          # setup toolchain and builders.
           rust-toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain rust-toolchain;
-          rustSrc = craneLib.cleanCargoSource ./.;
-
           on = opam-nix.lib.${system};
 
+          # setup base ocaml tooling.
           ocamlBasePackagesQuery = {
             ocaml-variants = "5.4.1+options,ocaml-option-flambda";
             miru = "*";
@@ -76,22 +76,23 @@
             ocaml-lsp-server = "*";
           };
 
-          ocamlBaseScope = on.buildOpamProject' {
+          baseOcamlScope = on.buildOpamProject' {
             repos = [ opam-repository ];
           } (lib.cleanSource ./.) (ocamlBasePackagesQuery // ocamlDevPackagesQuery);
+          baseOcamlCompiler = baseOcamlScope.ocaml-compiler;
 
-          ocamlCompiler = ocamlBaseScope.ocaml-compiler;
-
+          # build the miru-machine static object, which depends on the base ocaml compiler
+          # due to ocaml-interop.
+          rustSrc = craneLib.cleanCargoSource ./.;
           miruMachineCommonArgs = {
             pname = "miru-machine";
             version = "0.1.0";
             cargoExtraArgs = "-p miru-machine";
             src = rustSrc;
             strictDeps = true;
-            nativeBuildInputs = [ ocamlCompiler ];
+            nativeBuildInputs = [ baseOcamlCompiler ];
           };
           miruMachineCargoArtifacts = craneLib.buildDepsOnly miruMachineCommonArgs;
-
           miru-machine = craneLib.buildPackage (
             miruMachineCommonArgs
             // {
@@ -99,28 +100,37 @@
             }
           );
 
-          ocamlScope = ocamlBaseScope.overrideScope (
+          # inject the miru-machine static object into miru. additionally, setup injection
+          # env variables for conditional compilation on the dune side.
+          ocamlScope = baseOcamlScope.overrideScope (
             _: prev: {
               inherit miru-machine;
 
               miru = prev.miru.overrideAttrs (oldAttrs: {
                 propagatedBuildInputs = (oldAttrs.propagatedBuildInputs or [ ]) ++ [ miru-machine ];
 
+                # when inside the Nix builder, it'll use the static object prepared by
+                # crane instead of trying to build it itself.
                 IS_NIX_BUILD_ENV = "true";
-                MIRU_machine_DIR = "${miru-machine}";
+                CRANE_MIRU_MACHINE_DIR = "${miru-machine}";
               });
             }
           );
 
+          # put the toolchains and development tools in one place.
           devPackages = [
             rust-toolchain
-            ocamlCompiler
+            ocamlScope.ocaml-compiler
           ]
           ++ builtins.attrValues (pkgs.lib.getAttrs (builtins.attrNames ocamlDevPackagesQuery) ocamlScope);
         in
         {
           packages = rec {
-            inherit (ocamlScope) miru miru-repl;
+            inherit (ocamlScope)
+              miru
+              miru-machine
+              miru-repl
+              ;
             default = miru;
           };
 
@@ -161,19 +171,26 @@
           };
 
           overlayAttrs = {
-            inherit miru-machine;
-            inherit (ocamlScope) miru miru-repl;
+            inherit (ocamlScope)
+              miru
+              miru-machine
+              miru-repl
+              ;
           };
 
           devShells.default = pkgs.mkShell {
             name = "miru-dev";
 
             inputsFrom = builtins.attrValues {
-              inherit miru-machine;
-              inherit (ocamlScope) miru miru-repl;
+              inherit (ocamlScope)
+                miru
+                miru-machine
+                miru-repl
+                ;
             };
             nativeBuildInputs = devPackages;
 
+            # Required for conditional compilation to work nice when using dune directly.
             IS_NIX_BUILD_ENV = "false";
           };
         };

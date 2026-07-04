@@ -8,4 +8,5 @@ edition.workspace = true
 crate-type = ["staticlib"]
 
 [dependencies]
+rtl = { package = "miru-rtl", path = "../miru-rtl" }
 ocaml-interop = "0.12.0"
