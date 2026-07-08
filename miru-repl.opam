@@ -7,8 +7,8 @@ tags: ["miru-repl" "miru"]
 homepage: "https://sr.ht/~debarchito/miru"
 bug-reports: "https://todo.sr.ht/~debarchito/miru"
 depends: [
-  "dune" {>= "3.22"}
-  "ocaml" {>= "5.4.1"}
+  "dune" {>= "3.24"}
+  "ocaml" {>= "5.5.0"}
   "miru" {= version}
   "odoc" {with-doc}
 ]

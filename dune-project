@@ -1,4 +1,4 @@
-(lang dune 3.22)
+(lang dune 3.24)
 
 (name miru)
 
@@ -19,7 +19,7 @@
  (description "My take on a specialized statically typed Lisp+ML hybrid")
  (depends
   (ocaml
-   (>= "5.4.1"))
+   (>= "5.5.0"))
   (asai
    (>= "0.3.1"))
   (alcotest
@@ -33,7 +33,7 @@
  (description "Miru's interactive REPL")
  (depends
   (ocaml
-   (>= "5.4.1"))
+   (>= "5.5.0"))
   (miru
    (= :version)))
  (tags

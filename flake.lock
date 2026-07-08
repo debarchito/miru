@@ -178,15 +178,15 @@
         "opam2json": "opam2json"
       },
       "locked": {
-        "lastModified": 1782476416,
-        "narHash": "sha256-oFdLuHny6fe6kSOrOTN5Bfls+GisFiM8ytYrBQpGRog=",
-        "owner": "tweag",
+        "lastModified": 1783494719,
+        "narHash": "sha256-lY9ceaXFru4OWlp6wyJTYaJbXyB4yPvmAOgHiI73pDI=",
+        "owner": "debarchito",
         "repo": "opam-nix",
-        "rev": "583fb2ed4db44fcda4f6222c554949503d50a352",
+        "rev": "d76b555f51e1d1077776802cd5ef416253fa81f4",
         "type": "github"
       },
       "original": {
-        "owner": "tweag",
+        "owner": "debarchito",
         "repo": "opam-nix",
         "type": "github"
       }
@@ -283,11 +283,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1783404876,
-        "narHash": "sha256-DAh1CfiRVwr8Szkj5PiHmsqh10NHPb8SKPx7w/B+l9E=",
+        "lastModified": 1783488441,
+        "narHash": "sha256-jmWf+H3iC/0z7/mmvTovaJx1E/LME1QyHkyk+AFfJPk=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "3c161f20193bd91a73913b417e5b06d41860336d",
+        "rev": "7dc3a177a239ed879c5581a80f6dc246c7e102f1",
         "type": "github"
       },
       "original": {
