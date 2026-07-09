@@ -55,4 +55,5 @@ reference to evaluate the REPL against.
 
 ## 5. Licensing.
 
-Miru is licensed under [GPLv3-only](./LICENSE).
+This repository is dual-licensed under either the [MIT License](./LICENSE-MIT)
+or the [Apache 2.0 License](./LICENSE-APACHE-2.0), at your option.
