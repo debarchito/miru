@@ -190,7 +190,7 @@ let run () =
         done
       with End_of_file -> () ) ;
     let content = Buffer.contents buf in
-    let forms = Reader.Core.read_all_reported ~title:"stdin" content in
+    let forms = Reader.Driver.read_all_reported ~title:"stdin" content in
     List.iter (fun f -> Format.printf "%a\n\n%!" pp f) forms
   end
   else begin
@@ -220,7 +220,7 @@ let run () =
           if is_balanced full then begin
             add_history history full ;
             ( try
-                let forms = Reader.Core.read_all full in
+                let forms = Reader.Driver.read_all full in
                 List.iter (fun f -> Format.printf "%a\n%!" pp f) forms
               with Reader.Err.Reader_error (span_opt, msg, detail) ->
                 display_error (span_opt, msg, detail) ;

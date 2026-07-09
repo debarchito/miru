@@ -10,6 +10,7 @@ module Message = struct
     | OddStructBody
     | InvalidFieldKey
     | InvalidMutableFieldKey
+    | TagHandlerError
 
   let default_severity _ = Asai.Diagnostic.Error
 
@@ -34,6 +35,8 @@ module Message = struct
         "E009"
     | InvalidMutableFieldKey ->
         "E010"
+    | TagHandlerError ->
+        "E011"
 end
 
 include Asai.Reporter.Make (Message)

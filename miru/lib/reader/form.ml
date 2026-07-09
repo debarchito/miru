@@ -1,5 +1,6 @@
 type t =
   | Unit
+  | Empty
   | Bool of bool
   | Int of int64
   | Float of float

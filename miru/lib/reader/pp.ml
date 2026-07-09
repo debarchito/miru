@@ -1,6 +1,8 @@
 let rec pp_ast fmt = function
   | Form.Unit ->
       Format.pp_print_string fmt "Unit"
+  | Form.Empty ->
+      Format.pp_print_string fmt "Empty"
   | Form.Bool v ->
       Format.fprintf fmt "(Bool %b)" v
   | Form.Int n ->
