@@ -22,18 +22,21 @@ around (hence the name "cover"; the term is derived from topological covers).
 
 > NOTE: All components are not yet complete.
 
-- [miru-rtl](/miru-rtl) or Miru runtime library is written in Rust. It is built
-  to be embedable.
-- [miru](/miru) holds the lowering tools (source -> bytecode, and source ->
+- [miru-rtl](./miru-rtl) or Miru runtime library is written in Rust. It is built
+  to be embedable. (This replaced `miru-core` in case you are trying to find
+  it).
+- [miru](./miru) holds the lowering tools (source -> bytecode, and source ->
   assembly in future), macro engine, type checker, etc. all written in OCaml.
-- [miru-machine](/miru-machine) is the register machine written in Rust. This
+- [miru-machine](./miru-machine) is the register machine written in Rust. This
   also powers the macro engine and is bridged to OCaml.
+- [miru-repl](./miru-repl) is the Read-Eval-Print-Loop and the primary way to
+  interact with Miru right now.
 
 ## 3. Get started!
 
-It's a fresh project with lots of aspirations. I want to take my time and
-implement things mindfully. This means a lot of experimentation and what could
-be better than a REPL for such situations? To try out the repl:
+It's a fresh project with lots of aspirations. I want to take my time to learn
+and implement things mindfully. This means a lot of experimentation and what
+could be better than a REPL for such situations? To try out the repl:
 
 ```fish
 # Scaffold the development environment
@@ -50,8 +53,8 @@ Nix for everything). So, you can build and run the REPL directly using:
 nix run sourcehut:~debarchito/miru#miru-repl
 ```
 
-I'll attach a document explaining the syntax in the upcoming days, so you have a
-reference to evaluate the REPL against.
+Take a look at [DRAFT.md](./DRAFT.md) for a quick guide on the syntax of the
+language.
 
 ## 5. Licensing.
 
