@@ -1,4 +1,4 @@
-This document drafts an high level design of what the language _should_ look
+This document drafts a high level design of what the language _should_ look
 like. This document serves as my scratchpad for what features I want to
 implement and experiment with. It is an ongoing process and nothing is
 finalized. I've tried to format it similar to
@@ -22,7 +22,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (let name "Miru") ; Inline comments use a single ";"
 
 ;;; This is a documentation comment for the greet function that takes an
-;;; argument name infered as string.
+;;; argument name inferred as string.
 (let greet [name]
   (printf "Hello, %s" name))
 
@@ -144,7 +144,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   { id string
     name string })
 
-;; This will be infered as session. Anonymous definitions are illegal here due
+;; This will be inferred as session. Anonymous definitions are illegal here due
 ;; to the fundamental limitations of a nominal type.
 (let s1 { id "MIRU" name "Miru Session" })
 
@@ -163,7 +163,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (print-id s1) ; s1 is nominal.
 (print-id s2) ; s2 is structural.
 
-;; While expressive, structural records comes with their own set of performance
+;; While expressive, structural records come with their own set of performance
 ;; penalties. Nominal records can be represented as a single block of memory with
 ;; field access mapped to offset lookups. Structural records make use of VTables
 ;; which equate to extra pointer chasing and loss of contiguity.
@@ -171,7 +171,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Records can have mutable fields.
 (type person
   { name string
-    mutable age int }) ; mutable is also a specifier but for fields!
+    (mutable age) int }) ; mutable is also a specifier but for fields!
 
 (let p1 { name "John Doe" age 30 })
 (.age! 31 p1) ; an special setter is generated with a "!" suffix to allow mutation.
@@ -202,6 +202,58 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; for them.
 (@<- "Miru" name)
 (println @name) ; Miru
+
+;; We can also use the type expression to define sum or variant types.
+(type (shape r1 r2) ; r1 and r2 are type variables turned row variables.
+  (Circle { radius float | r1 }) ; Variant constructors must be capitalized!
+  (Rectangle { width float, height float | r2 })) ;
+
+(let [basic-circle { radius 5.0 | _ }
+      fancy-circle { radius 10.0, color "red" | _ }
+      shape-1 (Circle basic-circle)
+      shape-2 (Circle fancy-circle)]) ; Both are valid!
+
+;; Let's look at more examples of variant types:
+(type colors
+  (White) ; Constructors with no payload.
+  (Gray)
+  (Black)
+  (RGB [int int int]) ; Tuple variants are also allowed!
+  (HSL { h int, s int, l int })) ; Record variants as usual.
+
+(let a White)
+(let b (RGB 240 80 40)) ; This uses the same [1 2 3] -> (tuple 1 2 3) convention.
+(let c (HSL { h 240, s 80, l 40 }))
+
+;; Tuples variants are strictly nominal even though tuples are structural.
+;; Record variants are strictly normial even though records can be structural.
+;; Match expressions are really handy when it comes to ADTs.
+(match a
+  (=> (or (White) (Gray) (Black))
+    (println "Got constructors with no payload!"))
+  (=> (RGB t)
+    ;; The tuple t is refined in this scope, so we can use .<prop> syntax!
+    (printf "Got: %i * %i * %i" (.0 t) (.1 t) (.2 t)))
+  (=> (HSL r)
+    ;; Same goes for the record r!
+    ;; The compiler is smart enough to optimize .<prop> into offsets instead of
+    ;; using a VTable!
+    (printf "Got: { h %i, s %i, l %i }" (.h r) (.s r) (.l r))))
+
+;; We use the "alias" specifier to create type aliases.
+(type (alias word) (option int)) ; Why would anyone want an optional word :}
+
+;; We can also use (and ...) for mutually recursive types!
+;; Types don't require the "rec" specifier because they are recursive by default!
+(and
+  (type expression
+    (Literal  [int])
+    (Variable [string])
+    (Block    [(list statement)]))
+  (type statement
+    (Assignment     [string expression])
+    (IfThenElse     [expression statement statement])
+    (VoidExpression [expression])))
 ```
 
 TODO!
