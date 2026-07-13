@@ -24,7 +24,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;;; This is a documentation comment for the greet function that takes an
 ;;; argument name inferred as string.
 (let greet [name]
-  (printf "Hello, %s" name))
+  (println (String/concat "Hello, " name)))
 
 ;; You can specify the types explicitly if you want.
 ;; The type unit is special because Miru doesn't have an equivalent of nil as
@@ -32,7 +32,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Additionally, like most functional languages Miru lacks procedures. Every
 ;; function must return something even if it's an unit.
 (let greet [name : string] : unit
-  (printf "Hello, %s" name))
+  (println (String/concat "Hello, " name)))
 
 ;; You can also separate the type definition into a (: ...) expression.
 ;; The type signature are written in curried form.
@@ -40,7 +40,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; in mathematics.
 (: greet string -> unit)
 (let greet [name]
-  (printf "I've been greeting a lot today, isn't it %s?" name))
+  (open String/Implicits) ; Brings handy modular implicits into scope!
+  ;; Modular implicit allow locally-resolved typeclass-like features.
+  (println "I've been greeting a lot today, isn't it {}?" name))
 
 ;; Recursive functions need to be marked with a "rec" specifier.
 ;; Specifiers are special positional properties attached to labels.
@@ -156,7 +158,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
 ;; We'll take any record as input that has an "id" field.
-(let print-id [record : { id string | r }] ; "r" is a row variable.
+(let print-id [record : { id string | _ }] ; "_" is a row variable we ignored.
   (println (.id record))) ; Nominal types can seamlessly fit here!
 
 ;; Both of these work!
@@ -232,14 +234,17 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   (=> (or (White) (Gray) (Black))
     (println "Got constructors with no payload!"))
   (=> (RGB t)
+    (open Int/Implicits)
     ;; The tuple t is refined in this scope, so we can use .<prop> syntax!
-    (printf "Got: %i * %i * %i" (.0 t) (.1 t) (.2 t)))
+    (println "Got: {} * {} * {}" (.0 t) (.1 t) (.2 t)))
   (=> (HSL r)
+    (open Int/Implicits)
     ;; Same goes for the record r!
     ;; The compiler is smart enough to optimize .<prop> into offsets instead of
     ;; using a VTable!
-    (printf "Got: { h %i, s %i, l %i }" (.h r) (.s r) (.l r))))
-
+    (println "Got: {{ h {}, s {}, l {} }" (.h r) (.s r) (.l r))))
+    ;;             ^ double braces to escape!
+  
 ;; We use the "alias" specifier to create type aliases.
 (type (alias word) (option int)) ; Why would anyone want an optional word :}
 
