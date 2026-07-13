@@ -106,7 +106,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (let square (fn [x] (* x x)))
 
 ;; Symbolic functions are completely valid!
-(let (~/) [x] (/. 1.0 x)) ; /. is the division operator for floats!
+(let (~/) [x] (/ 1.0 x)) ; / uses the same modular implicits!
 (~/ 4.0) ; 0.25
 
 ;; Miru has a lot of data structures but the most fundamental ones include:
@@ -259,6 +259,18 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
     (Assignment     [string expression])
     (IfThenElse     [expression statement statement])
     (VoidExpression [expression])))
+
+;; Let's build a tree for an example!
+(type (tree a)
+  (Empty)
+  (Node [(tree a) a (tree a)]))
+
+(let example-tree
+  (Node [
+    (Node [Empty 7 Empty])
+    5
+    (Node [Empty 9 Empty])
+  ]))
 ```
 
 TODO!
