@@ -95,12 +95,12 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (and
   (let (rec is-even?) [n]
     (match n
-      (=> 0 true)
-      (=> n (is-odd? (- n 1)))))
+      (0 true)
+      (n (is-odd? (- n 1)))))
   (let (rec is-odd?) [n]
     (match n
-      (=> 0 false)
-      (=> n (is-even? (- n 1))))))
+      (0 false)
+      (n (is-even? (- n 1))))))
 
 ;; Since functions are first-class you can always use lambdas.
 (let square (fn [x] (* x x)))
@@ -200,10 +200,14 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (println name.contents) ; MirU
 
 ;; This is a very useful construct and the stdlib will provide it by default.
-;; Mutating and de-referencing is common enough that Miru has built-in readers
-;; for them.
+;; Mutating and de-referencing is common enough that Miru has a built-in
+;; reader for references, and a symbolic function for mutation.
 (@<- "Miru" name)
 (println @name) ; Miru
+
+;; The "@<-" function is implemented as follows:
+(let (@<- a) [value : a, container : (ref a)]
+  (<- ref.contents value container))
 
 ;; We can also use the type expression to define sum or variant types.
 (type (shape r1 r2) ; r1 and r2 are type variables turned row variables.
@@ -231,13 +235,13 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Record variants are strictly normial even though records can be structural.
 ;; Match expressions are really handy when it comes to ADTs.
 (match a
-  (=> (or (White) (Gray) (Black))
+  ((or (White) (Gray) (Black))
     (println "Got constructors with no payload!"))
-  (=> (RGB t)
+  ((RGB t)
     (open Int/Implicits)
     ;; The tuple t is refined in this scope, so we can use .<prop> syntax!
     (println "Got: {} * {} * {}" (.0 t) (.1 t) (.2 t)))
-  (=> (HSL r)
+  ((HSL r)
     (open Int/Implicits)
     ;; Same goes for the record r!
     ;; The compiler is smart enough to optimize .<prop> into offsets instead of
