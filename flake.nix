@@ -190,9 +190,6 @@
                 ;
             };
             nativeBuildInputs = devPackages;
-
-            # Required for conditional compilation to work nice when using dune directly.
-            IS_NIX_BUILD_ENV = "false";
           };
         };
     };
