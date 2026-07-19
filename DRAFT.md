@@ -275,6 +275,38 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
     5
     (Node [Empty 9 Empty])
   ]))
+
+;; Before diving into GADTs, I want to introduce the crown jewel: effects.
+;; We define a simple effect with two distinct effect operations.
+(effect Console
+  (Read  [unit]   -> string)
+  (Write [string] -> unit))
+
+;; Now, we define a function that performs the Console effect.
+;; Miru tracks the set of effect types as effect rows.
+;; | _ is required to keep the function open to composition.
+(: prompt-user string -> string / { Console | _ })
+(let prompt-user [msg]
+  ;; Effect must be performed.
+  (perform (Write msg))
+  (perform (Read ())))
+
+;; Now, let's write a handler for the function.
+;; It reduces the Console effect from the row!
+(: mock-console (unit -> string / { Console | e }) -> string / { e })
+(let mock-console [action]
+  (handle (action ())
+    (Write msg) k ; These is the continuation!
+      (block
+        (println (String/concat "[WRITE]: " msg))
+        (k ()))
+    (Read ()) k
+      (block
+        (k "Hello from the handler!"))))
+
+;; #(...) are anonymous functions.
+(let res (mock-console #(prompt-user "Enter command")))
+(println res)
 ```
 
 TODO!
