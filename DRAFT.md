@@ -32,7 +32,8 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Additionally, like most functional languages Miru lacks procedures. Every
 ;; function must return something even if it's an unit.
 (let greet [name : string] : unit
-  (println (String/concat "Hello, " name)))
+  ;; "<>" is a symbolic alias of String/concat!
+  (println (<> "Hello, " name)))
 
 ;; You can also separate the type definition into a (: ...) expression.
 ;; The type signature are written in curried form.
@@ -40,8 +41,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; in mathematics.
 (: greet string -> unit)
 (let greet [name]
-  (open String/Implicits) ; Brings handy modular implicits into scope!
-  ;; Modular implicit allow locally-resolved typeclass-like features.
+  ;; "println" is not a function but a macro!
+  ;; Modular implicits allow locally-resolved typeclass-like features.
+  ;; More on them later.
   (println "I've been greeting a lot today, isn't it {}?" name))
 
 ;; Recursive functions need to be marked with a "rec" specifier.
@@ -109,36 +111,50 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (let (~/) [x] (/ 1.0 x)) ; / uses the same modular implicits!
 (~/ 4.0) ; 0.25
 
-;; Miru has a lot of data structures but the most fundamental ones include:
+;; Miru has a lot of data structures. Let's take a look at some of them:
 
-;; Lists are immutable, ordered, homogeneous singly linked lists.
+;; Lists are dynamic, ordered, homogeneous singly linked lists.
+;; Lists are persistent data structures.
 '(1 2 3)
-;; or
-(list 1 2 3)
 
 ;; Tuples are immutable, fixed-sized collections of heterogeneous elements.
-;; They are also a product type!
+;; Tuples are both persistent and a product type!
 [1, 2.0 "Hello World"] ; commas are the same as whitespace.
-;; or
-(tuple 1 2.0 "Hello World")
 
-;; Arrays are immutable, fixed-sized, contiguous, homogeneous collections.
-#a[1 2 3] ; #a is a tagged dispatch macro! More on it later.
-;; or
-(array 1 2 3)
+;; Arrays are fixed-sized, contiguous, homogeneous collections.
+;; Unlike OCaml, Miru arrays are immutable.
+[| 1 2 3 |]
 
-;; Dynamic arrays are the mutable version of arrays.
+;; Mutable arrays are the mutable version of arrays.
 ;; In Miru, mutability is a property of data structures. Thus, Miru has no
 ;; concept of a mutable pointer.
-#da[1 2 3]
-;; or
-(dynamic-array 1 2 3)
+[! 1 2 3 !]
 
-;; Sets are immutable, purely applicative, unordered, homogeneous collections
-;; that enforce unique elements.
-#s[1 2 3]
+;; Dynamic arrays are the resizable version of mutable arrays.
+;; They are also known as vectors in other languages.
+[~ 1 2 3 ~]
+
+;; Sets are immutable, purely applicative, ordered (tree-based), homogeneous
+;; collections that enforce unique elements. Sets are also persistent.
+#set [| 1 2 3 |]
 ;; or
-(set 1 2 3)
+(Core/Collections/Set/Persistent/from-array [| 1 2 3 |])
+
+;; Hashsets are sets but mutable, unordered (hash-based) and not persistent.
+#hash-set [| 1 2 3 |]
+;; or
+(Core/Collections/Set/Hash/from-array [| 1 2 3 |])
+
+;; Maps are for homogeneous key-value pairs. Like sets, they are immutable and
+;; persistent.
+#map { "id" 1 } ; Borrows the struct body form. More on them right ahead!
+;; or
+(Core/Collections/Map/Persistent/from-array [| ["id" 1] |])
+
+;; Hashmaps are maps but mutable, unordered and not persistent.
+#hash-map { "id" 1 }
+;; or
+(Core/Collections/Map/Hash/from-array [| ["id" 1] |])
 
 ;; Records are product types just like tuples. They are nominal by default but
 ;; can be made structural to explicitly enable row polymorphism.
@@ -228,7 +244,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   (HSL { h int, s int, l int })) ; Record variants as usual.
 
 (let a White)
-(let b (RGB 240 80 40)) ; This uses the same [1 2 3] -> (tuple 1 2 3) convention.
+(let b (RGB 240 80 40)) ; This uses the same [1 2 3] -> (<named-tuple> 1 2 3) convention.
 (let c (HSL { h 240, s 80, l 40 }))
 
 ;; Tuples variants are strictly nominal even though tuples are structural.
@@ -238,15 +254,13 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   ((or (White) (Gray) (Black))
     (println "Got constructors with no payload!"))
   ((RGB t)
-    (open Int/Implicits)
     ;; The tuple t is refined in this scope, so we can use .<prop> syntax!
     (println "Got: {} * {} * {}" (.0 t) (.1 t) (.2 t)))
   ((HSL r)
-    (open Int/Implicits)
     ;; Same goes for the record r!
     ;; The compiler is smart enough to optimize .<prop> into offsets instead of
     ;; using a VTable!
-    (println "Got: {{ h {}, s {}, l {} }" (.h r) (.s r) (.l r))))
+    (println "Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r))))
     ;;             ^ double braces to escape!
   
 ;; We use the "alias" specifier to create type aliases.
