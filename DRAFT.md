@@ -35,11 +35,11 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   ;; "<>" is a symbolic alias of String/concat!
   (println (<> "Hello, " name)))
 
-;; You can also separate the type definition into a (: ...) expression.
+;; You can also separate the type definition into a (sig ...) expression.
 ;; The type signature are written in curried form.
 ;; Type signatures use infix forms which is how you would define them
 ;; in mathematics.
-(: greet string -> unit)
+(sig greet : string -> unit)
 (let greet [name]
   ;; "println" is not a function but a macro!
   ;; Modular implicits allow locally-resolved typeclass-like features.
@@ -62,18 +62,23 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Unlike most Lisps, you must specify "()" when calling a function just for its
 ;; side-effect.
 (greet-morning ())
-;; This makes the next expression syntactically valid, but sementically illegal.
+;; This makes this expression invalid:
 (greet-morning)
+;; If you want to alias functions, you can simply:
+(let aliased-greet-morning greet-morning)
 
 ;; Functions are automatically curried.
 (let make-inc [x y] (+ x y)) ; int -> int -> int
 (let inc-2 (make-inc 2)) ; int -> int
 (inc-2 3) ; 5
 
+;; This makes composition really clean.
+(let new-list (map (* 2) [1 2 3 4])) ; [2 4 6 8]
+
 ;; You can use (block ...) to group multiples expressions in a single block.
 (let print-and-return [x]
   (block
-    (println (int-to-string x))
+    (println (Int/to-string x))
     x))
 
 ;; You can use let to create scoped expressions too.
@@ -93,7 +98,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   (+ a b c d)) ; Return the final expression!
 
 ;; This is especially useful to implement mutually recursive functions so the
-;; compiler can track value bounds. No need for pre-defined symbol!
+;; compiler can track value bounds. No need for pre-defined symbols!
 (and
   (let (rec is-even?) [n]
     (match n
@@ -108,7 +113,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (let square (fn [x] (* x x)))
 
 ;; Symbolic functions are completely valid!
-(let (~/) [x] (/ 1.0 x)) ; / uses the same modular implicits!
+(let ~/ [x] (/ 1.0 x))
 (~/ 4.0) ; 0.25
 
 ;; Miru has a lot of data structures. Let's take a look at some of them:
@@ -136,7 +141,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; Sets are immutable, purely applicative, ordered (tree-based), homogeneous
 ;; collections that enforce unique elements. Sets are also persistent.
-#set [| 1 2 3 |]
+#set [| 1 2 3 |] ; #set is a tagged template macro! More on them later.
 ;; or
 (Core/Collections/Set/Persistent/from-array [| 1 2 3 |])
 
@@ -160,21 +165,22 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; can be made structural to explicitly enable row polymorphism.
 (type session
   { id string
-    name string })
+    name string }) ; the keys are untagged symbols!
 
-;; This will be inferred as session. Anonymous definitions are illegal here due
+;; This will be inferred as session. Anonymous definitions are illegal due
 ;; to the fundamental limitations of a nominal type.
 (let s1 { id "MIRU" name "Miru Session" })
 
-;; To opt into structural typing, append the anonymous row operator `| _`.
+;; To opt into structural typing, append the row operator `| <row-variable>`.
 ;; This forces the compiler to treat the record as an open, anonymous shape
 ;; instead of binding it to a nominal definition.
-(let s2 { id "MIRU" name "Miru Session" | _ })
+(let s2 { id "MIRU" name "Miru Session" | _ }) ; "_" is an ignored row variable.
 
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
 ;; We'll take any record as input that has an "id" field.
-(let print-id [record : { id string | _ }] ; "_" is a row variable we ignored.
+(sig print-id : { id string | _ } -> unit)
+(let print-id [record]
   (println (.id record))) ; Nominal types can seamlessly fit here!
 
 ;; Both of these work!
@@ -183,13 +189,16 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; While expressive, structural records come with their own set of performance
 ;; penalties. Nominal records can be represented as a single block of memory with
-;; field access mapped to offset lookups. Structural records make use of VTables
-;; which equate to extra pointer chasing and loss of contiguity.
+;; field access mapped to offset lookups. Instead of using VTables, this
+;; implementation uses evidence passing, passing field offsets dynamically via
+;; registers. The performance tax here shifts from pointer-chasing cache misses
+;; to register pressure, minor function-call overhead, and the loss of specific
+;; static optimizations (like vectorization) at compilation boundaries.
 
 ;; Records can have mutable fields.
 (type person
   { name string
-    (mutable age) int }) ; mutable is also a specifier but for fields!
+    (mut age) int }) ; "mut" is also a specifier but for fields!
 
 (let p1 { name "John Doe" age 30 })
 (.age! 31 p1) ; an special setter is generated with a "!" suffix to allow mutation.
@@ -203,7 +212,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; We can use this property to build a ref cell around records.
 (type (ref a) ; "a" is a type variable.
-  { mutable contents a })
+  { (mut contents) a })
 
 ;; We can use ref cells to simulate mutable bindings.
 (let name (ref "Miru"))
@@ -222,7 +231,8 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (println @name) ; Miru
 
 ;; The "@<-" function is implemented as follows:
-(let (@<- a) [value : a, container : (ref a)]
+(sig (@<- a) : a -> (ref a) -> unit)
+(let @<- [value container]
   (<- ref.contents value container))
 
 ;; We can also use the type expression to define sum or variant types.
@@ -231,26 +241,28 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   (Rectangle { width float, height float | r2 })) ;
 
 (let [basic-circle { radius 5.0 | _ }
-      fancy-circle { radius 10.0, color "red" | _ }
+      fancy-circle { radius 10.0 color "red" | _ }
       shape-1 (Circle basic-circle)
       shape-2 (Circle fancy-circle)]) ; Both are valid!
 
 ;; Let's look at more examples of variant types:
 (type colors
-  (White) ; Constructors with no payload.
+  (White) ; Constructors with no payload still need parens.
   (Gray)
   (Black)
   (RGB [int int int]) ; Tuple variants are also allowed!
   (HSL { h int, s int, l int })) ; Record variants as usual.
 
 (let a White)
-(let b (RGB 240 80 40)) ; This uses the same [1 2 3] -> (<named-tuple> 1 2 3) convention.
+(let b (RGB [240 80 40]))
 (let c (HSL { h 240, s 80, l 40 }))
 
 ;; Tuples variants are strictly nominal even though tuples are structural.
 ;; Record variants are strictly normial even though records can be structural.
 ;; Match expressions are really handy when it comes to ADTs.
 (match a
+  ;; Just like (and ...), (or ...) are special context-resolvers.
+  ;; Here, they together with "match" replace the need of a "|" operator.
   ((or (White) (Gray) (Black))
     (println "Got constructors with no payload!"))
   ((RGB t)
@@ -259,9 +271,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   ((HSL r)
     ;; Same goes for the record r!
     ;; The compiler is smart enough to optimize .<prop> into offsets instead of
-    ;; using a VTable!
+    ;; using evidence passing!
     (println "Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r))))
-    ;;             ^ double braces to escape!
+    ;;             ^        <->        ^ double braces to escape!
   
 ;; We use the "alias" specifier to create type aliases.
 (type (alias word) (option int)) ; Why would anyone want an optional word :}
@@ -287,19 +299,18 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   (Node [
     (Node [Empty 7 Empty])
     5
-    (Node [Empty 9 Empty])
-  ]))
+    (Node [Empty 9 Empty])]))
 
 ;; Before diving into GADTs, I want to introduce the crown jewel: effects.
 ;; We define a simple effect with two distinct effect operations.
 (effect Console
-  (Read  [unit]   -> string)
-  (Write [string] -> unit))
+  (Read  : unit -> string)
+  (Write : string -> unit))
 
 ;; Now, we define a function that performs the Console effect.
 ;; Miru tracks the set of effect types as effect rows.
 ;; | _ is required to keep the function open to composition.
-(: prompt-user string -> string / { Console | _ })
+(sig prompt-user : string -> string / { Console | _ })
 (let prompt-user [msg]
   ;; Effect must be performed.
   (perform (Write msg))
@@ -307,7 +318,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; Now, let's write a handler for the function.
 ;; It reduces the Console effect from the row!
-(: mock-console (unit -> string / { Console | e }) -> string / { e })
+(sig mock-console : (unit -> string / { Console | e }) -> string / { e })
 (let mock-console [action]
   (handle (action ())
     (Write msg) k ; These is the continuation!
