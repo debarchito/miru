@@ -118,13 +118,13 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; Miru has a lot of data structures. Let's take a look at some of them:
 
-;; Lists are dynamic, ordered, homogeneous singly linked lists.
-;; Lists are persistent data structures.
-'(1 2 3)
-
 ;; Tuples are immutable, fixed-sized collections of heterogeneous elements.
 ;; Tuples are both persistent and a product type!
-[1, 2.0 "Hello World"] ; commas are the same as whitespace.
+[ 1, 2.0 "Hello World" ] ; commas are the same as whitespace.
+
+;; Lists are dynamic, ordered, homogeneous singly linked lists.
+;; Lists are persistent data structures.
+[> 1 2 3 >]
 
 ;; Arrays are fixed-sized, contiguous, homogeneous collections.
 ;; Unlike OCaml, Miru arrays are immutable.
