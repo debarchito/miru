@@ -32,7 +32,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Additionally, like most functional languages Miru lacks procedures. Every
 ;; function must return something even if it's an unit.
 (let greet [name : string] : unit
-  ;; "<>" is a symbolic alias of String/concat!
+  ;; "<>" is a semigroup append operator.
+  ;; Since string concatenation forms a free semigroup, it behaves the same
+  ;; as String/concat!
   (println (<> "Hello, " name)))
 
 ;; You can also separate the type definition into a (sig ...) expression.
@@ -253,7 +255,8 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   (RGB [int int int]) ; Tuple variants are also allowed!
   (HSL { h int, s int, l int })) ; Record variants as usual.
 
-(let a White)
+(let a (White)) ; Still need the parens here!
+(let b (colors.Gray)) ; You can namespace them!
 (let b (RGB [240 80 40]))
 (let c (HSL { h 240, s 80, l 40 }))
 
@@ -312,9 +315,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; | _ is required to keep the function open to composition.
 (sig prompt-user : string -> string / { Console | _ })
 (let prompt-user [msg]
-  ;; Effect must be performed.
-  (perform (Write msg))
-  (perform (Read ())))
+  ;; Effect calls look like function calls.
+  (Write msg)
+  (Console.Read ())) ; You can also namespace them!
 
 ;; Now, let's write a handler for the function.
 ;; It reduces the Console effect from the row!
