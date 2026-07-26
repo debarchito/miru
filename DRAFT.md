@@ -78,16 +78,11 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (let new-list (map (* 2) [1 2 3 4])) ; [2 4 6 8]
 
 ;; You can use (block ...) to group multiples expressions in a single block.
-(let print-and-return [x]
-  (block
-    (println (Int/to-string x))
-    x))
-
-;; You can use let to create scoped expressions too.
 ;; let uses sequential binding, similar to let* in Scheme.
-(let [x 10
-      y (+ x 10)]
-       (+ x y)) ; 30
+(block
+  (let [x 10
+        y (+ x 10)])
+  (+ x y)) ; 30
 
 ;; You can utilize (and ...) for parallel bindings.
 ;; Seperating "block", "let" and "and" keeps composition cleaner.
@@ -110,6 +105,13 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
     (match n
       (0 false)
       (n (is-even? (- n 1))))))
+
+;; Additionaly, let can also be used for destructuring.
+(let [x y z] [1 2.3 "hello!"])
+(print x) ; 1
+(print y) ; 2.3
+(print z) ; hello!
+;; Almost all data structures can be destuctured!
 
 ;; Since functions are first-class you can always use lambdas.
 (let square (fn [x] (* x x)))
@@ -140,6 +142,35 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Dynamic arrays are the resizable version of mutable arrays.
 ;; They are also known as vectors in other languages.
 [~ 1 2 3 ~]
+
+;; Miru is also an array language, which means it has native support for
+;; N-dimentional tensors, both immutable and mutable.
+;; Miru is column-major and 0-indexed.
+[| 1 4 7 |  ; Pipes to used to segment dimensions.
+   2 5 8 |  ; Rule of thumb: tensor dimension = (no. of pipes) + 1
+   3 6 9 |] ; This is 3x3 matrix!
+
+;; The mutable version being:
+[! 1 4 7 |
+   2 5 8 |
+   3 6 9 !]
+
+;; What about a 3D tensor?
+[| 1 5 9  |
+   2 6 10 ||
+   3 7 11 |
+   4 8 12 |] ; This is a 2x2x3 tensor!
+
+;; Tensors are special because they are NOT arrays of arrays. The elements
+;; are stored contiguosly in memory and queried via compile-time offsets
+;; making them ideal for linear algebra!
+
+;; Unlike the fixed variants, dynamic arrays are strictly 1-dimentional.
+;; Hence, there is no *intrinsic* way to build dynamic dimention-reshaping
+;; tensors. Instead, you can use a 1D dynamic array ([~ ... ~]) to handle
+;; runtime growth/dynamism, and then perform a zero-copy (!!) cast into a
+;; fixed N-dimensional tensor as long as the total element count matches
+;; the target shape!
 
 ;; Sets are immutable, purely applicative, ordered (tree-based), homogeneous
 ;; collections that enforce unique elements. Sets are also persistent.
