@@ -60,12 +60,12 @@
             overlays = [ (import rust-overlay) ];
           };
 
-          # setup toolchain and builders.
+          # Setup toolchain and builders.
           rust-toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           craneLib = (crane.mkLib pkgs).overrideToolchain rust-toolchain;
           on = opam-nix.lib.${system};
 
-          # setup base ocaml tooling.
+          # Setup base ocaml tooling.
           ocamlBasePackagesQuery = {
             ocaml-variants = "5.5.0+options,ocaml-option-flambda";
             ocaml-config = "*";
@@ -82,7 +82,7 @@
           } (lib.cleanSource ./.) (ocamlBasePackagesQuery // ocamlDevPackagesQuery);
           baseOcamlCompiler = baseOcamlScope.ocaml-compiler;
 
-          # build the miru-machine static object, which depends on the base ocaml compiler
+          # Build the miru-machine static object, which depends on the base ocaml compiler
           # due to ocaml-interop.
           rustSrc = craneLib.cleanCargoSource ./.;
           miruMachineCommonArgs = {
@@ -101,16 +101,14 @@
             }
           );
 
-          # inject the miru-machine static object into miru. additionally, setup injection
+          # Inject the miru-machine static object into miru. additionally, setup injection
           # env variables for conditional compilation on the dune side.
           ocamlScope = baseOcamlScope.overrideScope (
             _: prev: {
               inherit miru-machine;
 
-              miru = prev.miru.overrideAttrs (oldAttrs: {
-                propagatedBuildInputs = (oldAttrs.propagatedBuildInputs or [ ]) ++ [ miru-machine ];
-
-                # when inside the Nix builder, it'll use the static object prepared by
+              miru = prev.miru.overrideAttrs (_: {
+                # When inside the Nix builder, it'll use the static object prepared by
                 # crane instead of trying to build it itself.
                 IS_NIX_BUILD_ENV = "true";
                 CRANE_MIRU_MACHINE_DIR = "${miru-machine}";
@@ -118,7 +116,7 @@
             }
           );
 
-          # put the toolchains and development tools in one place.
+          # Put the toolchains and development tools in one place.
           devPackages = [
             rust-toolchain
             ocamlScope.ocaml-compiler
