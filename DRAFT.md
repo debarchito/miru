@@ -162,7 +162,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
    4 8 12 |] ; This is a 2x2x3 tensor!
 
 ;; Tensors are special because they are NOT arrays of arrays. The elements
-;; are stored contiguosly in memory and queried via compile-time offsets
+;; are stored contiguosly in memory and queried via pre-calculated offsets
 ;; making them ideal for linear algebra!
 
 ;; Unlike the fixed variants, dynamic arrays are strictly 1-dimentional.
@@ -172,27 +172,67 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; fixed N-dimensional tensor as long as the total element count matches
 ;; the target shape!
 
-;; Sets are immutable, purely applicative, ordered (tree-based), homogeneous
-;; collections that enforce unique elements. Sets are also persistent.
-#set [| 1 2 3 |] ; #set is a tagged template macro! More on them later.
+;; Sets are immutable, persistent, purely applicative, unordered (CHAMP),
+;; homogeneous collections that enforce unique elements. Uses list delimiters
+;; [> ... >] in the reader phase to signal a heap-allocated tree layout.
+#set [> 1 2 3 >] ; #set is a tagged template macro! More on them later.
 ;; or
-(Core/Collections/Set/Persistent/from-array [| 1 2 3 |])
+(Std/Collections/Set/from-array [| 1 2 3 |])
 
-;; Hashsets are sets but mutable, unordered (hash-based) and not persistent.
+;; Hashsets are mutable, non-persistent, unordered (hash-based) linear
+;; collections. Uses flat vector delimiters [| ... |] to signify a contiguous
+;; memory layout (Swiss Table!).
 #hash-set [| 1 2 3 |]
 ;; or
-(Core/Collections/Set/Hash/from-array [| 1 2 3 |])
+(Std/Collections/Set/Hash/from-array [| 1 2 3 |])
 
-;; Maps are for homogeneous key-value pairs. Like sets, they are immutable and
-;; persistent.
-#map { "id" 1 } ; Borrows the struct body form. More on them right ahead!
+;; Sorted sets are immutable, persistent, value-ordered (Persistent B-Tree)
+;; collections.
+#sorted-set [> 1 2 3 >]
 ;; or
-(Core/Collections/Map/Persistent/from-array [| ["id" 1] |])
+(Std/Collections/Set/Sorted/from-array [| 1 2 3 |])
 
-;; Hashmaps are maps but mutable, unordered and not persistent.
-#hash-map { "id" 1 }
+;; Ordered sets are immutable, persistent, insertion-ordered (Linked CHAMP)
+;; collections.
+#ordered-set [> 1 2 3 >]
 ;; or
-(Core/Collections/Map/Hash/from-array [| ["id" 1] |])
+(Std/Collections/Set/Ordered/from-array [| 1 2 3 |])
+
+;; Bit sets are mutable or unboxed, bitwise-packed sets of non-negative
+;; integers.
+#bit-set [| 0 1 64 128 |]
+;; or
+(Std/Collections/Set/Bit/from-array [| 0 1 64 128 |])
+
+;; Maps are immutable, persistent, purely applicative, unordered (CHAMP),
+;; homogeneous key-value collections.
+#map { id 1 } ; Borrows the struct body form.
+;; or
+(Std/Collections/Map/from-array [| ["id" 1] |])
+
+;; Hashmaps are mutable, non-persistent, unordered (hash-based) linear
+;; key-value maps.
+#hash-map { id 1 }
+;; or
+(Std/Collections/Map/Hash/from-array [| ["id" 1] |])
+
+;; Sorted maps are immutable, persistent, value-ordered (Persistent B-Tree)
+;; key-value maps. Orders entries by key comparison to enable range queries
+;; and bounds slicing.
+#sorted-map { id 1 }
+;; or
+(Std/Collections/Map/Sorted/from-array [| ["id" 1] |])
+
+;; Ordered maps are immutable, persistent, insertion-ordered (Linked CHAMP)
+;; key-value maps.
+#ordered-map { id 1 }
+;; or
+(Std/Collections/Map/Ordered/from-array [| ["id" 1] |])
+
+;; The mutable hash-sets and hash-maps function as accumulators for the
+;; persistent variants just like dynamic arrays function for tensors. That
+;; said, unlike dynamic arrays <-> tensors, hash-* <-> persisted-* is NOT
+;; zero-copy and will allocate due to layout differences.
 
 ;; Records are product types just like tuples. They are nominal by default but
 ;; can be made structural to explicitly enable row polymorphism.
@@ -338,8 +378,8 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Before diving into GADTs, I want to introduce the crown jewel: effects.
 ;; We define a simple effect with two distinct effect operations.
 (effect Console
-  (Read  : unit -> string)
-  (Write : string -> unit))
+  (read  : unit -> string)
+  (write : string -> unit))
 
 ;; Now, we define a function that performs the Console effect.
 ;; Miru tracks the set of effect types as effect rows.
@@ -347,8 +387,8 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (sig prompt-user : string -> string / { Console | _ })
 (let prompt-user [msg]
   ;; Effect calls look like function calls.
-  (Write msg)
-  (Console.Read ())) ; You can also namespace them!
+  (write msg)
+  (Console.read ())) ; You can also namespace them!
 
 ;; Now, let's write a handler for the function.
 ;; It reduces the Console effect from the row!
