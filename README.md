@@ -20,7 +20,14 @@ around (hence the name "cover"; the term is derived from topological covers).
 
 ## 2. What are the components?
 
-> NOTE: All components are not yet complete.
+> [!NOTE]
+>
+> Implementation is currently halted due to systematic redesign that is being
+> heavily documented in [DRAFT.md](./DRAFT.md). The memory model will be
+> completely overhauled with a Value Kind model to replace the strictly uniform
+> memory model. I'm also researching about Liquid Refinement Types, Data Kinds
+> and native N-D tensor extensions to Miru. Once the draft is somewhat
+> solidified, I'll start re-implementing sections.
 
 - [miru-rtl](./miru-rtl) or Miru runtime library is written in Rust. It is built
   to be embedable. (This replaced `miru-core` in case you are trying to find
