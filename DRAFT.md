@@ -384,15 +384,15 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Now, we define a function that performs the Console effect.
 ;; Miru tracks the set of effect types as effect rows.
 ;; | _ is required to keep the function open to composition.
-(sig prompt-user : string -> string / { Console | _ })
+(sig prompt-user : string -> string / [Console | _])
 (let prompt-user [msg]
   ;; Effect calls look like function calls.
   (write msg)
-  (Console.read ())) ; You can also namespace them!
+  (Console/read ())) ; You can also namespace them.
 
 ;; Now, let's write a handler for the function.
 ;; It reduces the Console effect from the row!
-(sig mock-console : (unit -> string / { Console | e }) -> string / { e })
+(sig mock-console : (unit -> string / [Console | e]) -> string / [e])
 (let mock-console [action]
   (handle (action ())
     (Write msg) k ; These is the continuation!
@@ -406,6 +406,43 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; #(...) are anonymous functions.
 (let res (mock-console #(prompt-user "Enter command")))
 (println res)
+
+;; Miru effects are stackful and one-shot by default. It covers almost all
+;; of the cases you'd use effects for. However, there are scenarios where
+;; stackless state machines are inherently more efficient. I might consider
+;; a special compiler tag to opt-into stack lifting in the future.
+
+;; Multi-shot effects are opt-in and are always stackful due to their nature.
+(effect (multi Amb) ; You use the "multi" specifier to make it multi-shot.
+  (flip : unit -> bool))
+
+;; Let's look at a function that takes a number and adds either 10 or 0
+;; depending on the flip.
+;; Because it is multi-shot, this function will internally return *twice*.
+(sig choices : int -> int / [Amb | _])
+(let choices [x]
+  (if (flip ())
+    (+ x 10)
+    (+ x 0)))
+
+(sig handle-amb : (unit -> a / [Amb | e]) -> (List a) / [e])
+(let handle-amb [action]
+  (handle (action ())
+    ;; If the function completes normally with value 'v', wrap it in a list.
+    (Return v) 
+      [> v >]
+    ;; When flip happens, we branch by calling 'k' twice.
+    (Flip ()) k
+      (block
+        ;; 1st shot: Pass true and run until the end of the timeline.
+        (let true-branch  (k true))  
+        ;; 2nd shot: Pass false and run from the EXACT SAME checkpoint again.
+        (let false-branch (k false)) 
+        ;; Combine the results of both.
+        (<> true-branch false-branch))))
+
+(let res (handle-amb #(choices 5)))
+(println res) ; [> 15 5 >]
 ```
 
 TODO!
