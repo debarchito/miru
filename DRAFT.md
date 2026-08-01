@@ -395,11 +395,11 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (sig mock-console : (unit -> string / [Console | e]) -> string / [e])
 (let mock-console [action]
   (handle (action ())
-    (Write msg) k ; These is the continuation!
+    (write msg) k ; These is the continuation!
       (block
         (println (String/concat "[WRITE]: " msg))
         (k ()))
-    (Read ()) k
+    (read ()) k
       (block
         (k "Hello from the handler!"))))
 
@@ -413,8 +413,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; a special compiler tag to opt-into stack lifting in the future.
 
 ;; Multi-shot effects are opt-in and are always stackful due to their nature.
-(effect (multi Amb) ; You use the "multi" specifier to make it multi-shot.
-  (flip : unit -> bool))
+(effect Amb
+  ((control flip) : unit -> bool))
+  ; You use the "control" specifier to make it multi-shot.
 
 ;; Let's look at a function that takes a number and adds either 10 or 0
 ;; depending on the flip.
@@ -429,17 +430,12 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (let handle-amb [action]
   (handle (action ())
     ;; If the function completes normally with value 'v', wrap it in a list.
-    (Return v) 
+    (return v) 
       [> v >]
     ;; When flip happens, we branch by calling 'k' twice.
-    (Flip ()) k
-      (block
-        ;; 1st shot: Pass true and run until the end of the timeline.
-        (let true-branch  (k true))  
-        ;; 2nd shot: Pass false and run from the EXACT SAME checkpoint again.
-        (let false-branch (k false)) 
-        ;; Combine the results of both.
-        (<> true-branch false-branch))))
+    (flip ()) k
+      ;; Combine the results of both.
+      (<> (k true) (k false))))
 
 (let res (handle-amb #(choices 5)))
 (println res) ; [> 15 5 >]
