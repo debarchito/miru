@@ -179,7 +179,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Sets are immutable, persistent, purely applicative, unordered (CHAMP),
 ;; homogeneous collections that enforce unique elements. Uses list delimiters
 ;; [> ... >] in the reader phase to signal a heap-allocated tree layout.
-#set [> 1 2 3 >] ; #set is a tagged template macro! More on them later.
+#set [> 1 2 3 >] ; #set is a tagged template reader! More on them later.
 ;; or
 (Std/Collections/Set/from-array [| 1 2 3 |])
 
@@ -241,8 +241,8 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Records are product types just like tuples. They are nominal by default but
 ;; can be made structural to explicitly enable row polymorphism.
 (type session
-  { id string
-    name string }) ; the keys are untagged symbols!
+  { id   : string
+    name : string }) ; the keys are untagged symbols!
 
 ;; This will be inferred as session. Anonymous definitions are illegal due
 ;; to the fundamental limitations of a nominal type.
@@ -256,7 +256,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
 ;; We'll take any record as input that has an "id" field.
-(sig print-id : { id string | _ } -> unit)
+(sig print-id : { id : string | _ } -> unit)
 (let print-id [record]
   (println (.id record))) ; Nominal types can seamlessly fit here!
 
@@ -274,8 +274,8 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; Records can have mutable fields.
 (type person
-  { name string
-    (mut age) int }) ; "mut" is also a specifier but for fields!
+  { name      : string
+    (mut age) : int }) ; "mut" is also a specifier but for fields!
 
 (let p1 { name "John Doe" age 30 })
 (.age! 31 p1) ; an special setter is generated with a "!" suffix to allow mutation.
@@ -289,7 +289,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; We can use this property to build a ref cell around records.
 (type (ref a) ; "a" is a type variable.
-  { (mut contents) a })
+  { (mut contents) : a })
 
 ;; We can use ref cells to simulate mutable bindings.
 (let name (ref "Miru"))
@@ -314,8 +314,8 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; We can also use the type expression to define sum or variant types.
 (type (shape r1 r2) ; r1 and r2 are type variables turned row variables.
-  (Circle { radius float | r1 }) ; Variant constructors must be capitalized!
-  (Rectangle { width float, height float | r2 })) ;
+  (Circle    : { radius : float | r1 }) ; Variant constructors must be capitalized!
+  (Rectangle : { width : float, height : float | r2 })) ;
 
 (let [basic-circle { radius 5.0 | _ }
       fancy-circle { radius 10.0 color "red" | _ }
@@ -327,8 +327,8 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   (White) ; Constructors with no payload still need parens.
   (Gray)
   (Black)
-  (RGB [int int int]) ; Tuple variants are also allowed!
-  (HSL { h int, s int, l int })) ; Record variants as usual.
+  (RGB : [int int int]) ; Tuple variants are also allowed!
+  (HSL : { h int, s int, l int })) ; Record variants as usual.
 
 (let a (White)) ; Still need the parens here!
 (let b (colors.Gray)) ; You can namespace them!
@@ -360,18 +360,18 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Types don't require the "rec" specifier because they are recursive by default!
 (and
   (type expression
-    (Literal  [int])
-    (Variable [string])
-    (Block    [(list statement)]))
+    (Literal  : [int])
+    (Variable : [string])
+    (Block    : [(list statement)]))
   (type statement
-    (Assignment     [string expression])
-    (IfThenElse     [expression statement statement])
-    (VoidExpression [expression])))
+    (Assignment     : [string expression])
+    (IfThenElse     : [expression statement statement])
+    (VoidExpression : [expression])))
 
 ;; Let's build a tree for an example!
 (type (tree a)
   (Empty)
-  (Node [(tree a) a (tree a)]))
+  (Node : [(tree a) a (tree a)]))
 
 (let example-tree
   (Node [
@@ -449,11 +449,11 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Can't use "expr" as expr is a built-in type for typed quotes which we'll
 ;; discuss later!
 (type (exp _) ; The paramter we'll specialize.
-  (Int     [int]                   -> (exp int))
   ; You MUST specify the returning type. Specialization is explicit!
-  (Bool    [bool]                  -> (exp bool))
-  (Add     [(exp int) (exp int)]   -> (exp int))
-  (IsZero  [(exp int)]             -> (exp bool)))
+  (Int    : [int]                 -> (exp int))
+  (Bool   : [bool]                -> (exp bool))
+  (Add    : [(exp int) (exp int)] -> (exp int))
+  (IsZero : [(exp int)]           -> (exp bool)))
 
 (sig (eval a) : (exp a) -> a)
 (let (rec eval) [e] ; The "rec" specifier is a property of the binding!
@@ -468,6 +468,27 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 (let bad-exp (Add (Int 5) (Bool true))) 
 ;;                        ^^^^^^^^^^^ Expected (exp int), got (exp bool)
+
+;; Miru's tagged template readers provide the same expression power as
+;; OCaml PPX transformers. This also mean, they come with their own set
+;; of downsides: fragility, hygiene and most importantly they are untyped!
+;; While they are very powerful compiler extensions, a typed subset makes
+;; day-to-day utilities feel less like a chore. Miru takes a lot of
+;; inspiration from MetaOCaml to implement expression values, and the two
+;; basic constructs to build them: quoting and splicing.
+
+;; These are just normal Miru functions that modify (expr a) just like any
+;; other data structure! It is also known as multi-stage expansion.
+(sig unroll : int -> expr int -> expr int)
+(let (rec unroll) [n x] 
+  (match n
+    (0 `1) ; Quoting!
+    (1 x)
+    (_ `(* $x $(unroll (-n 1) x))))) ; Splicing values in place!
+
+;; (expand ...) is a special form that runs ANY arbitrary computation at
+;; compile time!
+(let value (expand (unroll 4 `3))) ; 3 * 3 * 3 * 3 * 1
 ```
 
 TODO!
