@@ -251,7 +251,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; To opt into structural typing, append the row operator `| <row-variable>`.
 ;; This forces the compiler to treat the record as an open, anonymous shape
 ;; instead of binding it to a nominal definition.
-(let s2 { id "MIRU" name "Miru Session" | _ }) ; "_" is an ignored row variable.
+( : small  s2 { id "MIRU" name "Miru Session" | _ }) ; "_" is an ignored row variable.
 
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
@@ -379,6 +379,26 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
     5
     (Node [Empty 9 Empty])]))
 
+;; Variants are closed by nature. You can't extend them. This is where
+;; polymorphic variants come into picture! They operate the same way
+;; you would expect them to behave in OCaml! This is also powered using
+;; row-polymorphism but extended to variants. They are open and can form
+;; a structural union.
+(type (alias small) (or :A :B)) ; Look and behave a lot like keywords!
+(type (alias large) (or :A :B :C :D))
+
+(let process-large [x]
+  (match x
+    ((:A) "Alpha") ; They need to be inside (...) just like variants.
+    ((:B) "Beta")
+    ((:C) "Gamma")
+    ((:D) "Delta")))
+
+(let (item : small) (:A))
+(let (process-large item)) ; ERROR! small is not compatible with large.
+(let (process-large (:> item large))) ; Works!
+;; Type coercion is explicit in Miru! ":>" is the coercion operator.
+
 ;; Before diving into GADTs, I want to introduce the crown jewel: effects.
 ;; We define a simple effect with two distinct effect operations.
 (effect Console
@@ -417,9 +437,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; a special compiler tag to opt-into stack lifting in the future.
 
 ;; Multi-shot effects are opt-in and are always stackful due to their nature.
-(effect Amb
+(effect (multi Amb) ; Mark the effect using "multi" specifier.
   ((control flip) : unit -> bool))
-  ; You use the "control" specifier to make it multi-shot.
+  ; You use the "control" specifier to make this operation multi-shot.
 
 ;; Let's look at a function that takes a number and adds either 10 or 0
 ;; depending on the flip.
@@ -488,7 +508,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; (expand ...) is a special form that runs ANY arbitrary computation at
 ;; compile time!
-(let value (expand (unroll 4 `3))) ; 3 * 3 * 3 * 3 * 1
+(let value (expand (unroll 4 `3))) ; (* 3 (* 3 (* 3 (* 3 1))))
 ```
 
 TODO!
