@@ -120,6 +120,10 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (let ~/ [x] (/ 1.0 x))
 (~/ 4.0) ; 0.25
 
+;; Infact you can also do:
+(print "{}" ~/4.0) ; Symbolic functions with one arguments can be
+                   ; directly prefixed!
+
 ;; Miru has a lot of data structures. Let's take a look at some of them:
 
 ;; Tuples are immutable, fixed-sized collections of heterogeneous elements.
@@ -299,7 +303,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; This is a very useful construct and the stdlib will provide it by default.
 ;; Mutating and de-referencing is common enough that Miru has a built-in
-;; reader for references, and a symbolic function for mutation.
+;; functions for references, and a symbolic function for mutation.
 (@<- "Miru" name)
 (println @name) ; Miru
 
@@ -439,6 +443,31 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 (let res (handle-amb #(choices 5)))
 (println res) ; [> 15 5 >]
+
+;; Time to introduce GADTs!
+;; For this e.g., let's model an expresssion evaluator.
+;; Can't use "expr" as expr is a built-in type for typed quotes which we'll
+;; discuss later!
+(type (exp _) ; The paramter we'll specialize.
+  (Int     [int]                   -> (exp int))
+  ; You MUST specify the returning type. Specialization is explicit!
+  (Bool    [bool]                  -> (exp bool))
+  (Add     [(exp int) (exp int)]   -> (exp int))
+  (IsZero  [(exp int)]             -> (exp bool)))
+
+(sig (eval a) : (exp a) -> a)
+(let (rec eval) [e] ; The "rec" specifier is a property of the binding!
+  (match e ; The type parameter "a" is specialized in the branches!
+    (Int n)    n
+    (Bool b)   b
+    (Add x y)  (+ (eval x) (eval y))
+    (IsZero x) (= (eval x) 0)))
+
+(let safe-exp (Add (Int 5) (Int 10)))
+(eval safe-exp) ; 15
+
+(let bad-exp (Add (Int 5) (Bool true))) 
+;;                        ^^^^^^^^^^^ Expected (exp int), got (exp bool)
 ```
 
 TODO!
