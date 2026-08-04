@@ -313,9 +313,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
   (<- ref.contents value container))
 
 ;; We can also use the type expression to define sum or variant types.
-(type (shape r1 r2) ; r1 and r2 are type variables turned row variables.
-  (Circle    : { radius : float | r1 }) ; Variant constructors must be capitalized!
-  (Rectangle : { width : float, height : float | r2 })) ;
+(type (shape 'r1 'r2) ; 'r1 and 'r2 are type variables turned row variables.
+  (Circle    : { radius : float | 'r1 }) ; Variant constructors must be capitalized!
+  (Rectangle : { width : float, height : float | 'r2 })) ;
 
 (let [basic-circle { radius 5.0 | _ }
       fancy-circle { radius 10.0 color "red" | _ }
@@ -369,9 +369,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
     (VoidExpression : [expression])))
 
 ;; Let's build a tree for an example!
-(type (tree a)
+(type (tree 'a)
   (Empty)
-  (Node : [(tree a) a (tree a)]))
+  (Node : [(tree 'a) 'a (tree 'a)]))
 
 (let example-tree
   (Node [
@@ -425,7 +425,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; Now, let's write a handler for the function.
 ;; It reduces the Console effect from the row!
-(sig mock-console : (unit -> string / <Console | e>) -> string / <e>)
+(sig mock-console : (unit -> string / <Console | 'e>) -> string / <'e>)
 (let mock-console [action]
   (handle (action ())
     (write msg) k ; These is the continuation!
@@ -459,7 +459,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
     (+ x 10)
     (+ x 0)))
 
-(sig handle-amb : (unit -> a / <Amb | e>) -> (List a) / <e>)
+(sig handle-amb : (unit -> 'a / <Amb | 'e>) -> (List 'a) / <'e>)
 (let handle-amb [action]
   (handle (action ())
     ;; If the function completes normally with value 'v', wrap it in a list.
