@@ -251,7 +251,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; To opt into structural typing, append the row operator `| <row-variable>`.
 ;; This forces the compiler to treat the record as an open, anonymous shape
 ;; instead of binding it to a nominal definition.
-( : small  s2 { id "MIRU" name "Miru Session" | _ }) ; "_" is an ignored row variable.
+(let s2 { id "MIRU" name "Miru Session" | _ }) ; "_" is an ignored row variable.
 
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
@@ -324,13 +324,13 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; Let's look at more examples of variant types:
 (type colors
-  (White) ; Constructors with no payload still need parens.
-  (Gray)
+  (White)
+  Gray ; Parens are optional for constructors with no payload.
   (Black)
   (RGB : [int int int]) ; Tuple variants are also allowed!
   (HSL : { h int, s int, l int })) ; Record variants as usual.
 
-(let a (White)) ; Still need the parens here!
+(let a White)
 (let b (colors.Gray)) ; You can namespace them!
 (let b (RGB [240 80 40]))
 (let c (HSL { h 240, s 80, l 40 }))
@@ -380,24 +380,33 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
     (Node [Empty 9 Empty])]))
 
 ;; Variants are closed by nature. You can't extend them. This is where
-;; polymorphic variants come into picture! They operate the same way
+;; structural variants come into picture! They operate the same way
 ;; you would expect them to behave in OCaml! This is also powered using
 ;; row-polymorphism but extended to variants. They are open and can form
 ;; a structural union.
-(type (alias small) (or :A :B)) ; Look and behave a lot like keywords!
-(type (alias large) (or :A :B :C :D))
+(type small < :A :B >) ; Look and behave a lot like keywords!
+(type large < :A :B :C :D | _ >)
 
 (let process-large [x]
   (match x
-    ((:A) "Alpha") ; They need to be inside (...) just like variants.
-    ((:B) "Beta")
-    ((:C) "Gamma")
-    ((:D) "Delta")))
+    (:A "Alpha") ; They need to be inside (...) just like variants.
+    (:B "Beta")
+    (:C "Gamma")
+    (:D "Delta")
+    (_  "?")))
 
-(let (item : small) (:A))
+(let (item : small) :A)
 (let (process-large item)) ; ERROR! small is not compatible with large.
 (let (process-large (:> item large))) ; Works!
 ;; Type coercion is explicit in Miru! ":>" is the coercion operator.
+
+;; The colors variant e.g. but with structural variants:
+(type colors
+  < :White
+    :Gray
+    :Black
+    (:RGB : [int int int])
+    (:HSL : { h int, s int, l int }) >)
 
 ;; Before diving into GADTs, I want to introduce the crown jewel: effects.
 ;; We define a simple effect with two distinct effect operations.
@@ -408,7 +417,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Now, we define a function that performs the Console effect.
 ;; Miru tracks the set of effect types as effect rows.
 ;; | _ is required to keep the function open to composition.
-(sig prompt-user : string -> string / [Console | _])
+(sig prompt-user : string -> string / <Console | _>)
 (let prompt-user [msg]
   ;; Effect calls look like function calls.
   (write msg)
@@ -416,7 +425,7 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 
 ;; Now, let's write a handler for the function.
 ;; It reduces the Console effect from the row!
-(sig mock-console : (unit -> string / [Console | e]) -> string / [e])
+(sig mock-console : (unit -> string / <Console | e>) -> string / <e>)
 (let mock-console [action]
   (handle (action ())
     (write msg) k ; These is the continuation!
@@ -444,13 +453,13 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; Let's look at a function that takes a number and adds either 10 or 0
 ;; depending on the flip.
 ;; Because it is multi-shot, this function will internally return *twice*.
-(sig choices : int -> int / [Amb | _])
+(sig choices : int -> int / <Amb | _>)
 (let choices [x]
   (if (flip ())
     (+ x 10)
     (+ x 0)))
 
-(sig handle-amb : (unit -> a / [Amb | e]) -> (List a) / [e])
+(sig handle-amb : (unit -> a / <Amb | e>) -> (List a) / <e>)
 (let handle-amb [action]
   (handle (action ())
     ;; If the function completes normally with value 'v', wrap it in a list.
