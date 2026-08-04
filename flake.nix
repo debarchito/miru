@@ -73,6 +73,7 @@
             miru-repl = "*";
           };
           ocamlDevPackagesQuery = {
+            utop = "*";
             ocamlformat = "*";
             ocaml-lsp-server = "*";
           };
