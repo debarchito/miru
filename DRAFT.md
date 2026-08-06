@@ -13,7 +13,9 @@ Effect tracking. It's designed to be pragmatic and useful for day to day general
 purpose tasks while also being a great fit for doing math and science.
 
 It is strongly and statically typed, but instead of using manually written type
-annotations, it infers types of expressions using the Hindley-Milner algorithm.
+annotations, it infers types of expressions using an Hindley-Milner foundation
+extended with OutsideIn(X) constraint-solving engine and bi-directional
+type-checking strategies.
 
 ```clojure
 ;; This is a standalone comment.
@@ -364,9 +366,9 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
     (Variable : [string])
     (Block    : [(list statement)]))
   (type (rec statement)
-    (Assignment     : [string expression])
-    (IfThenElse     : [expression statement statement])
-    (VoidExpression : [expression])))
+    (Assignment      : [string expression])
+    (If-then-else    : [expression statement statement])
+    (Void-expression : [expression])))
 
 ;; Let's build a tree for an example!
 (type (tree 'a)
@@ -384,15 +386,18 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; you would expect them to behave in OCaml! This is also powered using
 ;; row-polymorphism but extended to variants. They are open and can form
 ;; a structural union.
-(type small < :A :B >) ; Look and behave a lot like keywords!
-(type large < :A :B :C :D | _ >)
+(type small < :A :B >) ; < ... > are rows!
+(type large < :A :B :C (:D string) | _ >) ; They can have payloads!
 
+;; They look a lot like keywords in Clojure but statically typed. Infact,
+;; they are a drop-in replacement for a lot of cases where you'd
+;; traditionally use keywords. Hence, the similar syntax.
 (let process-large [x]
   (match x
-    (:A "Alpha") ; They need to be inside (...) just like variants.
+    (:A "Alpha")
     (:B "Beta")
     (:C "Gamma")
-    (:D "Delta")
+    ((:D payload) payload)
     (_  "?")))
 
 (let (item : small) :A)
@@ -408,33 +413,61 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
     (:RGB : [int int int])
     (:HSL : { h int, s int, l int }) >)
 
-;; Before diving into GADTs, I want to introduce the crown jewel: effects.
+;; Time to introduce GADTs!
+;; For this e.g., let's model an expresssion evaluator.
+(type (exp _) ; The paramter we'll specialize.
+  ; You MUST specify the returning type. Specialization is explicit!
+  (Int     : [int]                 -> (exp int))
+  (Bool    : [bool]                -> (exp bool))
+  (Add     : [(exp int) (exp int)] -> (exp int))
+  (Is-zero : [(exp int)]           -> (exp bool)))
+
+(sig (eval a) : (exp a) -> a)
+(let (rec eval) [e] ; The "rec" specifier is a property of the binding!
+  (match e ; The type parameter "a" is specialized in the branches!
+    (Int n)    n
+    (Bool b)   b
+    (Add x y)  (+ (eval x) (eval y))
+    (Is-zero x) (= (eval x) 0)))
+
+(let safe-exp (Add (Int 5) (Int 10)))
+(eval safe-exp) ; 15
+
+(let bad-exp (Add (Int 5) (Bool true))) 
+;;                        ^^^^^^^^^^^ Expected (exp int), got (exp bool)
+
+;; Let me introduce you the crown jewel: effects.
 ;; We define a simple effect with two distinct effect operations.
-(effect Console
-  (read  : unit -> string)
-  (write : string -> unit))
+(effect console
+  (Read  : unit -> string)
+  (Write : string -> unit))
 
 ;; Now, we define a function that performs the Console effect.
 ;; Miru tracks the set of effect types as effect rows.
 ;; | _ is required to keep the function open to composition.
-(sig prompt-user : string -> string / <Console | _>)
+(sig prompt-user : string -> string / <console | _>)
 (let prompt-user [msg]
   ;; Effect calls look like function calls.
-  (write msg)
-  (Console/read ())) ; You can also namespace them.
+  (Write msg)
+  (console.Read ())) ; You can also namespace them.
+  ;; They look very similar to ADTs, right? Exactly! They are
+  ;; internally powered by GADTs but lifted as a distinct language
+  ;; feature for deeper syntactic and sementic integration.
 
 ;; Now, let's write a handler for the function.
 ;; It reduces the Console effect from the row!
-(sig mock-console : (unit -> string / <Console | 'e>) -> string / <'e>)
+;; '<id> is reserved for type variables in Miru not quoting.
+;; Infact, Miru only supports *typed* quasi-quoting using `(...) which
+;; evaluate to an (expr 't) data-structure. More on them later!
+(sig mock-console : (unit -> string / <console | 'e>) -> string / <'e>)
 (let mock-console [action]
   (handle (action ())
-    (write msg) k ; These is the continuation!
+    (Write msg)
       (block
         (println (String/concat "[WRITE]: " msg))
-        (k ()))
-    (read ()) k
-      (block
-        (k "Hello from the handler!"))))
+        (resume ())) ; Resume the continuation!
+    (Read ())
+      (resume "Hello from the handler!")))
 
 ;; #(...) are anonymous functions.
 (let res (mock-console #(prompt-user "Enter command")))
@@ -446,57 +479,69 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 ;; a special compiler tag to opt-into stack lifting in the future.
 
 ;; Multi-shot effects are opt-in and are always stackful due to their nature.
-(effect (multi Amb) ; Mark the effect using "multi" specifier.
-  ((control flip) : unit -> bool))
+(effect (multi amb) ; Mark the effect using "multi" specifier.
+  ((control Flip) : unit -> bool))
   ; You use the "control" specifier to make this operation multi-shot.
 
 ;; Let's look at a function that takes a number and adds either 10 or 0
 ;; depending on the flip.
 ;; Because it is multi-shot, this function will internally return *twice*.
-(sig choices : int -> int / <Amb | _>)
+(sig choices : int -> int / <amb | _>)
 (let choices [x]
-  (if (flip ())
+  (if (Flip ())
     (+ x 10)
     (+ x 0)))
 
-(sig handle-amb : (unit -> 'a / <Amb | 'e>) -> (List 'a) / <'e>)
+(sig handle-amb : (unit -> 'a / <amb | 'e>) -> (list 'a) / <'e>)
 (let handle-amb [action]
   (handle (action ())
     ;; If the function completes normally with value 'v', wrap it in a list.
-    (return v) 
-      [> v >]
-    ;; When flip happens, we branch by calling 'k' twice.
-    (flip ()) k
+    ;; Wrap the normal completion result in a list.
+    (Return v) [> v >]
+    ((Flip ()) k) ; k is the continuation captured!
       ;; Combine the results of both.
-      (<> (k true) (k false))))
+      (<> (resume k true) (resume k false))))
 
 (let res (handle-amb #(choices 5)))
 (println res) ; [> 15 5 >]
 
-;; Time to introduce GADTs!
-;; For this e.g., let's model an expresssion evaluator.
-;; Can't use "expr" as expr is a built-in type for typed quotes which we'll
-;; discuss later!
-(type (exp _) ; The paramter we'll specialize.
-  ; You MUST specify the returning type. Specialization is explicit!
-  (Int    : [int]                 -> (exp int))
-  (Bool   : [bool]                -> (exp bool))
-  (Add    : [(exp int) (exp int)] -> (exp int))
-  (IsZero : [(exp int)]           -> (exp bool)))
+;; While algebraic effects track what a computation does downstream (outputs), 
+;; Miru uses coeffects to track what a computation demands upstream (inputs). 
+;; Instead of bubbling up to a handler, coeffects represent dynamic contexts 
+;; injected down into the function before it can execute. We define them 
+;; using the "context" keyword.
+(context config
+  (Api-key  : unit -> string)
+  (Timeout : unit -> int))
 
-(sig (eval a) : (exp a) -> a)
-(let (rec eval) [e] ; The "rec" specifier is a property of the binding!
-  (match e ; The type parameter "a" is specialized in the branches!
-    (Int n)    n
-    (Bool b)   b
-    (Add x y)  (+ (eval x) (eval y))
-    (IsZero x) (= (eval x) 0)))
+;; Miru tracks coeffect rows using a backslash `\`. 
+;; Like effects, the `| _` keeps the context row open so the function can compose 
+;; in larger environments containing other unrelated context dependencies.
+(sig fetch-user-data : string -> string \ <config | _>)
+(let fetch-user-data [user-id]
+  ;; We extract values from the context.
+  (let key (Api-key ()))
+  (let delay (Timeout ()))
+  ;; ASSUME this function exists!
+  (http-get (String/concat "://api.com" user-id "?key=" key) delay))
 
-(let safe-exp (Add (Int 5) (Int 10)))
-(eval safe-exp) ; 15
+;; To discharge coeffects, we use a provider block instead of a handler block.
+;; The "provide" keyword injects values downward, reducing "config" from the row!
+(sig with-mock-config : (unit -> 'a \ <config | 'e>) -> 'a \ <'e>)
+(let with-mock-config [action]
+  (provide
+    (Api-key "top-secret-key!!!")
+    (Timeout 5000)
+    (action ())))
 
-(let bad-exp (Add (Int 5) (Bool true))) 
-;;                        ^^^^^^^^^^^ Expected (exp int), got (exp bool)
+(let profile (with-mock-config #(fetch-user-data "user_miru")))
+
+;; It's nice to think it in terms of: you handle effects and provide contexts.
+;; Effects capture dynamic control flow operations that bubble up the stack,
+;; but are structurally wrong for passive requirements. Coeffects exist to
+;; track the opposite direction: what a function demands down from its
+;; environment before executing. Coeffects are really useful to enable
+;; compile-time safety constraints.
 
 ;; Miru's tagged template readers provide the same expression power as
 ;; OCaml PPX transformers. This also mean, they come with their own set
