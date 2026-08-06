@@ -357,13 +357,13 @@ annotations, it infers types of expressions using the Hindley-Milner algorithm.
 (type (alias word) (option int)) ; Why would anyone want an optional word :}
 
 ;; We can also use (and ...) for mutually recursive types!
-;; Types don't require the "rec" specifier because they are recursive by default!
+;; Types also require the "rec" specifier. Implicit recursion is not allowed.
 (and
-  (type expression
+  (type (rec expression)
     (Literal  : [int])
     (Variable : [string])
     (Block    : [(list statement)]))
-  (type statement
+  (type (rec statement)
     (Assignment     : [string expression])
     (IfThenElse     : [expression statement statement])
     (VoidExpression : [expression])))
