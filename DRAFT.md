@@ -101,12 +101,12 @@ type-checking strategies.
 (and
   (let (rec is-even?) [n]
     (match n
-      (0 true)
-      (n (is-odd? (- n 1)))))
+      0 true
+      n (is-odd? (- n 1))))
   (let (rec is-odd?) [n]
     (match n
-      (0 false)
-      (n (is-even? (- n 1))))))
+      0 false
+      n (is-even? (- n 1)))))
 
 ;; Additionaly, let can also be used for destructuring.
 (let [x y z] [1 2.3 "hello!"])
@@ -315,9 +315,14 @@ type-checking strategies.
   (<- ref.contents value container))
 
 ;; We can also use the type expression to define sum or variant types.
-(type (shape 'r1 'r2) ; 'r1 and 'r2 are type variables turned row variables.
+;; '<id> is reserved for type variables in Miru not quoting.
+;; Infact, Miru only supports *typed* quasi-quoting using `(...) which
+;; evaluate to an (expr 't) data-structure. More on them later!
+(type shape
   (Circle    : { radius : float | 'r1 }) ; Variant constructors must be capitalized!
   (Rectangle : { width : float, height : float | 'r2 })) ;
+  ;; To note, 'r1 and 'r2 are type variables and they are differentt from
+  ;; locally abstract types, which we'll discuss below.
 
 (let [basic-circle { radius 5.0 | _ }
       fancy-circle { radius 10.0 color "red" | _ }
@@ -343,16 +348,18 @@ type-checking strategies.
 (match a
   ;; Just like (and ...), (or ...) are special context-resolvers.
   ;; Here, they together with "match" replace the need of a "|" operator.
-  ((or (White) (Gray) (Black))
-    (println "Got constructors with no payload!"))
-  ((RGB t)
+  (or White Gray Black)
+    (println "Got constructors with no payload!")
+
+  (RGB t)
     ;; The tuple t is refined in this scope, so we can use .<prop> syntax!
-    (println "Got: {} * {} * {}" (.0 t) (.1 t) (.2 t)))
-  ((HSL r)
+    (println "Got: {} * {} * {}" (.0 t) (.1 t) (.2 t))
+
+  (HSL r)
     ;; Same goes for the record r!
     ;; The compiler is smart enough to optimize .<prop> into offsets instead of
     ;; using evidence passing!
-    (println "Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r))))
+    (println "Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r)))
     ;;             ^        <->        ^ double braces to escape!
   
 ;; We use the "alias" specifier to create type aliases.
@@ -362,17 +369,17 @@ type-checking strategies.
 ;; Types also require the "rec" specifier. Implicit recursion is not allowed.
 (and
   (type (rec expression)
-    (Literal  : [int])
-    (Variable : [string])
-    (Block    : [(list statement)]))
+    (Literal  : int)
+    (Variable : string)
+    (Block    : (list statement)))
   (type (rec statement)
     (Assignment      : [string expression])
     (If-then-else    : [expression statement statement])
-    (Void-expression : [expression])))
+    (Void-expression : expression)))
 
-;; Let's build a tree for an example!
+;; Let's build a tree for an example! "a" here is again a type variable.
 (type (tree 'a)
-  (Empty)
+  Empty
   (Node : [(tree 'a) 'a (tree 'a)]))
 
 (let example-tree
@@ -394,11 +401,11 @@ type-checking strategies.
 ;; traditionally use keywords. Hence, the similar syntax.
 (let process-large [x]
   (match x
-    (:A "Alpha")
-    (:B "Beta")
-    (:C "Gamma")
-    ((:D payload) payload)
-    (_  "?")))
+    :A           "Alpha"
+    :B           "Beta"
+    :C           "Gamma"
+    (:D payload) payload
+    _            "?")))
 
 (let (item : small) :A)
 (let (process-large item)) ; ERROR! small is not compatible with large.
@@ -415,19 +422,25 @@ type-checking strategies.
 
 ;; Time to introduce GADTs!
 ;; For this e.g., let's model an expresssion evaluator.
-(type (exp _) ; The paramter we'll specialize.
+(type (exp _) ; The type variable we'll specialize.
   ; You MUST specify the returning type. Specialization is explicit!
-  (Int     : [int]                 -> (exp int))
-  (Bool    : [bool]                -> (exp bool))
+  (Int     : int                   -> (exp int))
+  (Bool    : bool                  -> (exp bool))
   (Add     : [(exp int) (exp int)] -> (exp int))
-  (Is-zero : [(exp int)]           -> (exp bool)))
+  (Is-zero : (exp int)             -> (exp bool)))
 
-(sig (eval a) : (exp a) -> a)
+;; (type a) introduces a locally abstract type called "a." They are NOT
+;; type variables! A type variable is a flexible placeholder that can unify
+;; with any type, while a locally abstract type creates a rigid, newly
+;; minted type identity scoped strictly inside that function. They are what
+;; enable local type refinement which is crucial to make GADTs work!
+(sig eval : (type a) . (exp a) -> a)
 (let (rec eval) [e] ; The "rec" specifier is a property of the binding!
-  (match e ; The type parameter "a" is specialized in the branches!
-    (Int n)    n
-    (Bool b)   b
-    (Add x y)  (+ (eval x) (eval y))
+  ;; The abstract type "a" is refined in the branches!
+  (match e
+    (Int n)     n
+    (Bool b)    b
+    (Add [x y]) (+ (eval x) (eval y))
     (Is-zero x) (= (eval x) 0)))
 
 (let safe-exp (Add (Int 5) (Int 10)))
@@ -439,7 +452,8 @@ type-checking strategies.
 ;; Let me introduce you the crown jewel: effects.
 ;; We define a simple effect with two distinct effect operations.
 (effect console
-  (Read  : unit -> string)
+  ;; Return types NOT encoded; they are not "normal" functions.
+  (Read  : unit -> string) 
   (Write : string -> unit))
 
 ;; Now, we define a function that performs the Console effect.
@@ -456,18 +470,16 @@ type-checking strategies.
 
 ;; Now, let's write a handler for the function.
 ;; It reduces the Console effect from the row!
-;; '<id> is reserved for type variables in Miru not quoting.
-;; Infact, Miru only supports *typed* quasi-quoting using `(...) which
-;; evaluate to an (expr 't) data-structure. More on them later!
 (sig mock-console : (unit -> string / <console | 'e>) -> string / <'e>)
 (let mock-console [action]
   (handle (action ())
-    (Write msg)
-      (block
-        (println (String/concat "[WRITE]: " msg))
-        (resume ())) ; Resume the continuation!
-    (Read ())
-      (resume "Hello from the handler!")))
+    ;; Tuples are commonly used for pairs.
+    [(Write msg) k] ; k is the captured continuation!
+       (block
+         (println (String/concat "[WRITE]: " msg))
+         (resume k ())) ; Resume the continuation!
+    [(Read ()) k]
+       (resume k "Hello from the handler!")))
 
 ;; #(...) are anonymous functions.
 (let res (mock-console #(prompt-user "Enter command")))
@@ -495,10 +507,12 @@ type-checking strategies.
 (sig handle-amb : (unit -> 'a / <amb | 'e>) -> (list 'a) / <'e>)
 (let handle-amb [action]
   (handle (action ())
-    ;; If the function completes normally with value 'v', wrap it in a list.
-    ;; Wrap the normal completion result in a list.
+    ;; Wrap the normal completion result in a list. This is special, and alse
+    ;; known as the value clause.
     (Return v) [> v >]
-    ((Flip ()) k) ; k is the continuation captured!
+    ;; Unlike Koka, you don't need to tell handler than Flip is a "control".
+    ;; The compiler can inspect the signature either way.
+    [(Flip ()) k]
       ;; Combine the results of both.
       (<> (resume k true) (resume k false))))
 
@@ -511,30 +525,35 @@ type-checking strategies.
 ;; injected down into the function before it can execute. We define them 
 ;; using the "context" keyword.
 (context config
-  (Api-key  : unit -> string)
-  (Timeout : unit -> int))
+  ;; These are lowercased because contexts/coeffects are represented internally
+  ;; as a struct with function fields just like how effects are modeled as GADTs
+  ;; with constructor fields. It makes it consistent with their internal
+  ;; represenation.
+  (api-key : string) ; Return types NOT encoded; they are not "normal" functions.
+  (timeout : int))
 
 ;; Miru tracks coeffect rows using a backslash `\`. 
-;; Like effects, the `| _` keeps the context row open so the function can compose 
-;; in larger environments containing other unrelated context dependencies.
-(sig fetch-user-data : string -> string \ <config | _>)
+;; Just like effect, coeffects also support row-polymorphism.
+(sig fetch-user-data : string \ <config | _> -> string)
 (let fetch-user-data [user-id]
   ;; We extract values from the context.
-  (let key (Api-key ()))
-  (let delay (Timeout ()))
-  ;; ASSUME this function exists!
-  (http-get (String/concat "://api.com" user-id "?key=" key) delay))
+  (let key (api-key ()))
+  (let delay (timeout ()))
+  ;; IMAGINE a fetch function exists!
+  (fetch (format "https://api.example.com/{}?key={}&delay={}" user-id key delay)))
 
 ;; To discharge coeffects, we use a provider block instead of a handler block.
 ;; The "provide" keyword injects values downward, reducing "config" from the row!
-(sig with-mock-config : (unit -> 'a \ <config | 'e>) -> 'a \ <'e>)
+(sig with-mock-config : (unit \ <config | _> -> 'a) -> 'a)
 (let with-mock-config [action]
   (provide
-    (Api-key "top-secret-key!!!")
-    (Timeout 5000)
+    ;; Provide the contexts! It looks like a function call but are not "normal" functions.
+    (api-key "top-secret-key!!!")
+    (timeout 5000)
+    ;; Now use these contexts!
     (action ())))
 
-(let profile (with-mock-config #(fetch-user-data "user_miru")))
+(with-mock-config #(fetch-user-data "user_miru")) ; Simple as that!
 
 ;; It's nice to think it in terms of: you handle effects and provide contexts.
 ;; Effects capture dynamic control flow operations that bubble up the stack,
@@ -556,9 +575,9 @@ type-checking strategies.
 (sig unroll : int -> expr int -> expr int)
 (let (rec unroll) [n x] 
   (match n
-    (0 `1) ; Quoting!
-    (1 x)
-    (_ `(* $x $(unroll (-n 1) x))))) ; Splicing values in place!
+    0 `1 ; Quoting!
+    1 x
+    _ `(* $x $(unroll (-n 1) x)))) ; Splicing values in place!
 
 ;; (expand ...) is a special form that runs ANY arbitrary computation at
 ;; compile time!
