@@ -534,22 +534,23 @@ type-checking strategies.
 
 ;; Miru tracks coeffect rows using a backslash `\`. 
 ;; Just like effect, coeffects also support row-polymorphism.
-(sig fetch-user-data : string \ <config | _> -> string)
+;; Each context must be assigned a name.
+(sig fetch-user-data : string \ <c : config | _> -> string)
 (let fetch-user-data [user-id]
-  ;; We extract values from the context.
-  (let key (api-key ()))
-  (let delay (timeout ()))
+  ;; We extract values from the context and can use the name binding!
+  (let key (c.api-key ()))
+  (let delay (c.timeout ()))
   ;; IMAGINE a fetch function exists!
   (fetch (format "https://api.example.com/{}?key={}&delay={}" user-id key delay)))
 
 ;; To discharge coeffects, we use a provider block instead of a handler block.
 ;; The "provide" keyword injects values downward, reducing "config" from the row!
-(sig with-mock-config : (unit \ <config | _> -> 'a) -> 'a)
+(sig with-mock-config : (unit \ <c : config | _> -> 'a) -> 'a)
 (let with-mock-config [action]
   (provide
-    ;; Provide the contexts! It looks like a function call but are not "normal" functions.
-    (api-key "top-secret-key!!!")
-    (timeout 5000)
+    ;; Provide the contexts!
+    (c.api-key "top-secret-key!!!")
+    (c.timeout 5000)
     ;; Now use these contexts!
     (action ())))
 
