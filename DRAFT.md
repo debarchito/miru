@@ -283,7 +283,7 @@ type-checking strategies.
     (mut age) : int }) ; "mut" is also a specifier but for fields!
 
 (let p1 { name "John Doe" age 30 })
-(.age! 31 p1) ; an special setter is generated with a "!" suffix to allow mutation.
+(.age! 31 p1) ; a special setter is generated with a "!" suffix to allow mutation.
 ;; This is also valid. Fully qualified setters are easier to optimize since the
 ;; nominal type is known before-hand.
 (person.age! 31 p1)
@@ -298,23 +298,29 @@ type-checking strategies.
 
 ;; We can use ref cells to simulate mutable bindings.
 (let name (ref "Miru"))
-(println name.contents) ; Miru
+(println (ref.contents name)) ; Miru
 
 (ref.contents! "MIRU" name)
-(println name.contents) ; MIRU
+;; Also valid!
+(println (.contents name)) ; MIRU
 
 (<- ref.contents "MirU" name)
-(println name.contents) ; MirU
+(println (ref.contents name)) ; MirU
 
 ;; This is a very useful construct and the stdlib will provide it by default.
 ;; Mutating and de-referencing is common enough that Miru has a built-in
-;; functions for references, and a symbolic function for mutation.
-(@<- "Miru" name)
-(println @name) ; Miru
+;; functions for references, and a symbolic function for mutation. This is
+;; similar to OCaml and Koka.
+(:= "Miru" name)
+(println !name) ; Miru
 
-;; The "@<-" function is implemented as follows:
-(sig (@<- a) : a -> (ref a) -> unit)
-(let @<- [value container]
+;; The functions are implemented as follows:
+(sig (! a) : (ref a) -> a)
+(let ! [container]
+  (ref.contents container))
+
+(sig (:= a) : a -> (ref a) -> unit)
+(let := [value container]
   (<- ref.contents value container))
 
 ;; We can also use the type expression to define sum or variant types.
@@ -475,14 +481,22 @@ type-checking strategies.
 ;; It reduces the Console effect from the row!
 (sig mock-console : (unit -> string / <console | 'e>) -> string / <'e>)
 (let mock-console [action]
-  (handle (action ())
-    ;; Tuples are commonly used for pairs.
-    [(Write msg) k] ; k is the captured continuation!
-       (block
-         (println (String/concat "[WRITE]: " msg))
-         (resume k ())) ; Resume the continuation!
-    [(Read ()) k]
-       (resume k "Hello from the handler!")))
+  ;; Handlers are scope-bound and respond to changes within the current
+  ;; scope and child scopes. with-expression allow us to eliminate deeply
+  ;; nested code blocks caused by trailing closures, etc. More concrete
+  ;; examples will follow soon. This is deeply inspired by Koka.
+  (with
+    (handler
+      ;; Tuples are commonly used for pairs.
+      [(Write msg) k] ; k is the captured continuation!
+         (block
+           (println (String/concat "[WRITE]: " msg))
+           (resume k ())) ; Resume the continuation!
+      [(Read ()) k]
+         (resume k "Hello from the handler!")))
+
+  ;; Now we can call the function without fear!
+  (action ()))
 
 ;; #(...) are anonymous functions.
 (let res (mock-console #(prompt-user "Enter command")))
@@ -509,18 +523,58 @@ type-checking strategies.
 
 (sig handle-amb : (unit -> 'a / <amb | 'e>) -> (list 'a) / <'e>)
 (let handle-amb [action]
-  (handle (action ())
-    ;; Wrap the normal completion result in a list. This is special, and alse
-    ;; known as the value clause.
-    (Return v) :(v)
-    ;; Unlike Koka, you don't need to tell handler than Flip is a "control".
-    ;; The compiler can inspect the signature either way.
-    [(Flip ()) k]
-      ;; Combine the results of both.
-      (<> (resume k true) (resume k false))))
+  (with
+    (handler
+      ;; Wrap the normal completion result in a list. This is special, and alse
+      ;; known as the value clause.
+      (Return v)
+        :(v)
+      ;; Unlike Koka, you don't need to tell handler than Flip is a "control".
+      ;; The compiler can inspect the signature either way.
+      [(Flip ()) k]
+        ;; Combine the results of both.
+        (<> (resume k true) (resume k false))))
+  (action ()))
 
 (let res (handle-amb #(choices 5)))
 (println res) ; :(15 5)
+
+;; Let's take a bit of time to understand the with-expression. Here are some
+;; cases. First is the case for a scoped resource manager.
+(let count-steps [()]
+  (scoped 0 #(block
+                (:= (+ !% 1) %)
+                (:= (+ !% 2) %)
+                !%)))
+
+;; That's a lot of nesting. Now let's rewrite it with with-expression.
+;; This makes the code very linear. with-expression takes advantage of the
+;; fact that Miru functions auto-curry and rewrite the scope for you.
+(let count-steps [()]
+  (with s (scoped 0))
+  (:= (+ !s 1) s)
+  (:= (+ !s 2) s)
+  !s)
+
+;; This is also the property that makes handlers much easier to write.
+(with
+  (handler
+    [(Emit msg) k]
+      (block
+        (println "{msg}")
+        (resume k ()))))
+
+(Emit "1st!")
+(Emit "2nd")
+
+;; Would otherwise be something closer to:
+(handler
+  [(Emit msg) k]
+      (block
+        (println "{msg}")
+        (resume k ())))
+  (#((Emit "1st!")
+     (Emit "2nd"))) ;; This will get very tedious with nested handlers.
 
 ;; While algebraic effects track what a computation does downstream (outputs), 
 ;; Miru uses coeffects to track what a computation demands upstream (inputs). 
@@ -577,7 +631,7 @@ type-checking strategies.
 
 ;; These are just normal Miru functions that modify (expr a) just like any
 ;; other data structure! It is also known as multi-stage expansion.
-(sig unroll : int -> expr int -> expr int)
+(sig unroll : int -> (expr int) -> (expr int))
 (let (rec unroll) [n x] 
   (match n
     0 `1 ; Quoting!
@@ -594,17 +648,16 @@ type-checking strategies.
 ;; you can prove that an index never leaves the array's bounds at compile-time!
 
 ;; Parameterizing length directly in the array type:
-(sig get-at : (type a) .
-  ;; Refinement uses the turnstile (|-) operator.
-  (arr : (array a)) -> (i : int |- (&& (>= i 0) (< i (Array/length arr)))) -> a)
+(sig get-at : (forall 'a) .
+  ;; Refinement uses the pipe (|) operator.
+  (arr : (array 'a)) -> (i : int | (&& (>= i 0) (< i (Array/length arr)))) -> 'a)
   ;; (Array/length arr) here works as a measure! More on measures and reflections
   ;; later.
 
-;; The compiler will ensure that 0 <= idx < length(arr) always holds true.
-(let get-at [arr idx]
-  ;; The refinement allows us to use the unsafe variant safely without runtime
-  ;; checks!
-  (Array/unsafe-get arr idx))
+;; The compiler will ensure that 0 <= i < length(arr) always holds true.
+(let get-at [arr i]
+  ;; The refinement allows us to remove runtime checks from this get call!
+  (Array/get arr i))
 
 ;; You can also move the predicate to an alias!
 ;; Very similar to LiquidHaskell!
@@ -612,8 +665,8 @@ type-checking strategies.
   (&& (>= i 0) (< i (Array/length arr))))
 
 ;; And use it:
-(sig get-at : (type a) .
-  (arr : (array a)) -> (i : int |- (in-bounds i arr)) -> a)
+(sig get-at : (forall 'a) .
+  (arr : (array 'a)) -> (i : int | (in-bounds i arr)) -> 'a)
 ```
 
 TODO!
