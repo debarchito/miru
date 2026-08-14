@@ -134,7 +134,10 @@ type-checking strategies.
 
 ;; Lists are dynamic, ordered, homogeneous singly linked lists.
 ;; Lists are persistent data structures.
-[> 1 2 3 >]
+;; Miru doesn't have '(...) for quote blocks so we can't really
+;; use them here. We instead utilize a special :(...) to signify
+;; a linked list!
+:( 1 2 3 )
 
 ;; Arrays are fixed-sized, contiguous, homogeneous collections.
 ;; Unlike OCaml, Miru arrays are immutable.
@@ -180,8 +183,8 @@ type-checking strategies.
 
 ;; Sets are immutable, persistent, purely applicative, unordered (CHAMP),
 ;; homogeneous collections that enforce unique elements. Uses list delimiters
-;; [> ... >] in the reader phase to signal a heap-allocated tree layout.
-#set [> 1 2 3 >] ; #set is a tagged template reader! More on them later.
+;; :(...) in the reader phase to signal a heap-allocated tree layout.
+#set :(1 2 3) ; #set is a tagged template reader! More on them later.
 ;; or
 (Std/Collections/Set/from-array [| 1 2 3 |])
 
@@ -194,13 +197,13 @@ type-checking strategies.
 
 ;; Sorted sets are immutable, persistent, value-ordered (Persistent B-Tree)
 ;; collections.
-#sorted-set [> 1 2 3 >]
+#sorted-set :(1 2 3)
 ;; or
 (Std/Collections/Set/Sorted/from-array [| 1 2 3 |])
 
 ;; Ordered sets are immutable, persistent, insertion-ordered (Linked CHAMP)
 ;; collections.
-#ordered-set [> 1 2 3 >]
+#ordered-set :(1 2 3)
 ;; or
 (Std/Collections/Set/Ordered/from-array [| 1 2 3 |])
 
@@ -509,7 +512,7 @@ type-checking strategies.
   (handle (action ())
     ;; Wrap the normal completion result in a list. This is special, and alse
     ;; known as the value clause.
-    (Return v) [> v >]
+    (Return v) :(v)
     ;; Unlike Koka, you don't need to tell handler than Flip is a "control".
     ;; The compiler can inspect the signature either way.
     [(Flip ()) k]
@@ -517,7 +520,7 @@ type-checking strategies.
       (<> (resume k true) (resume k false))))
 
 (let res (handle-amb #(choices 5)))
-(println res) ; [> 15 5 >]
+(println res) ; :(15 5)
 
 ;; While algebraic effects track what a computation does downstream (outputs), 
 ;; Miru uses coeffects to track what a computation demands upstream (inputs). 
@@ -534,18 +537,19 @@ type-checking strategies.
 
 ;; Miru tracks coeffect rows using a backslash `\`. 
 ;; Just like effect, coeffects also support row-polymorphism.
-;; Each context must be assigned a name.
+;; Each context may be assigned a name; it default to the name of the context
+;; otherwise.
 (sig fetch-user-data : string \ <c : config | _> -> string)
 (let fetch-user-data [user-id]
   ;; We extract values from the context and can use the name binding!
-  (let key (c.api-key ()))
+  (let key (c.api-key ())) ; For auto-inference, you could use config.api-key!
   (let delay (c.timeout ()))
   ;; IMAGINE a fetch function exists!
   (fetch (format "https://api.example.com/{}?key={}&delay={}" user-id key delay)))
 
 ;; To discharge coeffects, we use a provider block instead of a handler block.
 ;; The "provide" keyword injects values downward, reducing "config" from the row!
-(sig with-mock-config : (unit \ <c : config | _> -> 'a) -> 'a)
+(sig with-mock-config : (unit -> 'a) \ <c : config | _> -> 'a)
 (let with-mock-config [action]
   (provide
     ;; Provide the contexts!
@@ -578,11 +582,38 @@ type-checking strategies.
   (match n
     0 `1 ; Quoting!
     1 x
-    _ `(* $x $(unroll (-n 1) x)))) ; Splicing values in place!
+    _ `(* $(x) $(unroll (-n 1) x)))) ; Splicing values in place!
+    ;; $(<token>) IS splice not $<token>!
 
 ;; (expand ...) is a special form that runs ANY arbitrary computation at
 ;; compile time!
 (let value (expand (unroll 4 `3))) ; (* 3 (* 3 (* 3 (* 3 1))))
+
+;; Miru integrates SMT solvers to provide native support for Liquid Refinement
+;; types! A rather common runtime check is array bounds but with liquid types,
+;; you can prove that an index never leaves the array's bounds at compile-time!
+
+;; Parameterizing length directly in the array type:
+(sig get-at : (type a) .
+  ;; Refinement uses the turnstile (|-) operator.
+  (arr : (array a)) -> (i : int |- (&& (>= i 0) (< i (Array/length arr)))) -> a)
+  ;; (Array/length arr) here works as a measure! More on measures and reflections
+  ;; later.
+
+;; The compiler will ensure that 0 <= idx < length(arr) always holds true.
+(let get-at [arr idx]
+  ;; The refinement allows us to use the unsafe variant safely without runtime
+  ;; checks!
+  (Array/unsafe-get arr idx))
+
+;; You can also move the predicate to an alias!
+;; Very similar to LiquidHaskell!
+(predicate in-bounds [i arr]
+  (&& (>= i 0) (< i (Array/length arr))))
+
+;; And use it:
+(sig get-at : (type a) .
+  (arr : (array a)) -> (i : int |- (in-bounds i arr)) -> a)
 ```
 
 TODO!
