@@ -7,7 +7,7 @@
       inputs.nixpkgs-lib.follows = "nixpkgs-lib";
     };
     opam-nix = {
-      url = "github:debarchito/opam-nix";
+      url = "github:tweag/opam-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     opam-repository = {
@@ -72,6 +72,7 @@
             miru = "*";
             miru-repl = "*";
           };
+
           ocamlDevPackagesQuery = {
             utop = "*";
             ocamlformat = "*";
@@ -112,7 +113,7 @@
                 # When inside the Nix builder, it'll use the static object prepared by
                 # crane instead of trying to build it itself.
                 IS_NIX_BUILD_ENV = "true";
-                CRANE_MIRU_MACHINE_DIR = "${miru-machine}";
+                CRANE_MIRU_MACHINE_DIR = miru-machine;
               });
             }
           );
