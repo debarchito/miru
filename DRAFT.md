@@ -28,27 +28,31 @@ type-checking strategies.
 (let greet [name]
   (println (String/concat "Hello, " name)))
 
-;; You can specify the types explicitly if you want.
-;; The type unit is special because Miru doesn't have an equivalent of nil as
-;; a primitive.
+;; You can specify the type definition using a (sig ...) expression.
+;; The type signature are written in curried form. Type signatures use infix
+;; forms which is how you would define them in mathematics. The type unit is
+;; special because Miru doesn't have an equivalent of nil as a primitive.
 ;; Additionally, like most functional languages Miru lacks procedures. Every
 ;; function must return something even if it's an unit.
-(let greet [name : string] : unit
-  ;; "<>" is a semigroup append operator.
-  ;; Since string concatenation forms a free semigroup, it behaves the same
-  ;; as String/concat!
-  (println (<> "Hello, " name)))
-
-;; You can also separate the type definition into a (sig ...) expression.
-;; The type signature are written in curried form.
-;; Type signatures use infix forms which is how you would define them
-;; in mathematics.
 (sig greet : string -> unit)
 (let greet [name]
+  ;; "<>" is a semigroup append function. Since string concatenation forms a
+  ;; free semigroup, it behaves the same as String/concat!
+  (println (<> "Hello, " name))
   ;; "println" is not a function but a macro!
   ;; Modular implicits allow locally-resolved typeclass-like features.
   ;; More on them later.
-  (println "I've been greeting a lot today, isn't it {}?" name))
+  (println "I've been greeting a lot today, isn't it {}?" name)
+  ;; You can also use explicits; often called module-dependent functions.
+  (println (module String/Show) "This is the not the last hello, {}!" name)
+  ;; You can also pass multiple modules!
+  (println
+    (module String/Show) (module Int/Show)
+    "{} is pronounced {}" 1 "One")
+  ;; Thus the semigroup function can also be written as:
+  (println (<> (module String/Append) "Hello, " name)))
+  ;; Implicits can consume explicits because Miru implements modular elaboration
+  ;; i.e. implicits are desugared into explicits!
 
 ;; Recursive functions need to be marked with a "rec" specifier.
 ;; Specifiers are special positional properties attached to labels.
@@ -80,7 +84,8 @@ type-checking strategies.
 (let new-list (map (* 2) [1 2 3 4])) ; [2 4 6 8]
 
 ;; You can use (block ...) to group multiples expressions in a single block.
-;; let uses sequential binding, similar to let* in Scheme.
+;; let uses sequential binding, similar to let* in Scheme. They are similar to
+;; let ... in ... expressions in OCaml.
 (block
   (let [x 10
         y (+ x 10)])
@@ -119,12 +124,12 @@ type-checking strategies.
 (let square (fn [x] (* x x)))
 
 ;; Symbolic functions are completely valid!
-(let ~/ [x] (/ 1.0 x))
+;; They must be defined inside a (...)
+(let (~/) [x] (/ 1.0 x))
 (~/ 4.0) ; 0.25
 
-;; Infact you can also do:
-(print "{}" ~/4.0) ; Symbolic functions with one arguments can be
-                   ; directly prefixed!
+;; Symbolic functions with one arguments can be directly prefixed!
+(print "{}" ~/4.0)
 
 ;; Miru has a lot of data structures. Let's take a look at some of them:
 
@@ -143,9 +148,9 @@ type-checking strategies.
 ;; Unlike OCaml, Miru arrays are immutable.
 [| 1 2 3 |]
 
-;; Mutable arrays are the mutable version of arrays.
-;; In Miru, mutability is a property of data structures. Thus, Miru has no
-;; concept of a mutable pointer.
+;; Mutable arrays are the mutable version of arrays. They allow in-place
+;; mutaiton. In Miru, mutability is a property of data structures. Thus,
+;; Miru has no concept of a mutable pointer.
 [! 1 2 3 !]
 
 ;; Dynamic arrays are the resizable version of mutable arrays.
@@ -153,11 +158,11 @@ type-checking strategies.
 [~ 1 2 3 ~]
 
 ;; Miru is also an array language, which means it has native support for
-;; N-dimentional tensors, both immutable and mutable.
+;; N-dimentional tensors, both immutable and mutable but non-resizable.
 ;; Miru is column-major and 0-indexed.
 [| 1 4 7 |  ; Pipes to used to segment dimensions.
    2 5 8 |  ; Rule of thumb: tensor dimension = (no. of pipes) + 1
-   3 6 9 |] ; This is 3x3 matrix!
+   3 6 9 |] ; This is a 3x3 matrix!
 
 ;; The mutable version being:
 [! 1 4 7 |
@@ -172,14 +177,21 @@ type-checking strategies.
 
 ;; Tensors are special because they are NOT arrays of arrays. The elements
 ;; are stored contiguosly in memory and queried via pre-calculated offsets
-;; making them ideal for linear algebra!
+;; making them ideal for anything that need high-dimensional tensors.
 
 ;; Unlike the fixed variants, dynamic arrays are strictly 1-dimentional.
 ;; Hence, there is no *intrinsic* way to build dynamic dimention-reshaping
 ;; tensors. Instead, you can use a 1D dynamic array ([~ ... ~]) to handle
-;; runtime growth/dynamism, and then perform a zero-copy (!!) cast into a
+;; runtime growth/dynamism, and then perform a zero-copy cast into a
 ;; fixed N-dimensional tensor as long as the total element count matches
 ;; the target shape!
+
+(let dyn-arr [~ 1 2 3 4 5 6 7 8 9 ~])
+(let result (Tensor/from-dynamic [3 3] dyn-arr))
+
+;; You get static guarentees about the shape of the data at compiler time
+;; because Miru supports liquid types for compile-time dimension checking.
+;; More on them later!
 
 ;; Sets are immutable, persistent, purely applicative, unordered (CHAMP),
 ;; homogeneous collections that enforce unique elements. Uses list delimiters
@@ -283,25 +295,23 @@ type-checking strategies.
     (mut age) : int }) ; "mut" is also a specifier but for fields!
 
 (let p1 { name "John Doe" age 30 })
-(.age! 31 p1) ; a special setter is generated with a "!" suffix to allow mutation.
-;; This is also valid. Fully qualified setters are easier to optimize since the
-;; nominal type is known before-hand.
-(person.age! 31 p1)
 
-;; These setters boil down to a "<-" (mutating) primitive operation.
-;; All these operations are data-last.
+;; Miru has a single "<-" (mutating) primitive function.
+;; All operations are data-last.
 (<- person.age 31 p1)
 
+(person.age p1) ; 31
+
 ;; We can use this property to build a ref cell around records.
-(type (ref a) ; "a" is a type variable.
-  { (mut contents) : a })
+(type (ref 'a) ; 'a is also known as alpha; a unification variable.
+  { (mut contents) : 'a })
 
 ;; We can use ref cells to simulate mutable bindings.
 (let name (ref "Miru"))
 (println (ref.contents name)) ; Miru
 
 (ref.contents! "MIRU" name)
-;; Also valid!
+;; This is also valid!
 (println (.contents name)) ; MIRU
 
 (<- ref.contents "MirU" name)
@@ -315,21 +325,21 @@ type-checking strategies.
 (println !name) ; Miru
 
 ;; The functions are implemented as follows:
-(sig (! a) : (ref a) -> a)
-(let ! [container]
+(sig (!) : (ref 'a) -> 'a)
+(let (!) [container]
   (ref.contents container))
 
-(sig (:= a) : a -> (ref a) -> unit)
-(let := [value container]
+(sig (:=) : 'a -> (ref 'a) -> unit)
+(let (:=) [value container]
   (<- ref.contents value container))
 
 ;; We can also use the type expression to define sum or variant types.
 ;; '<id> is reserved for type variables in Miru not quoting.
 ;; Infact, Miru only supports *typed* quasi-quoting using `(...) which
 ;; evaluate to an (expr 't) data-structure. More on them later!
-(type shape
-  (Circle    : { radius : float | 'r1 }) ; Variant constructors must be capitalized!
-  (Rectangle : { width : float, height : float | 'r2 })) ;
+(type (shape 'r 's)
+  (Circle    : { radius : float | 'r }) ; Variant constructors must be capitalized!
+  (Rectangle : { width : float, height : float | 's })) ;
   ;; To note, 'r1 and 'r2 are type variables and they are differentt from
   ;; locally abstract types, which we'll discuss below.
 
@@ -508,6 +518,8 @@ type-checking strategies.
 ;; a special compiler tag to opt-into stack lifting in the future.
 
 ;; Multi-shot effects are opt-in and are always stackful due to their nature.
+;; Multi-shot are expensive because Miru explicitly clones the stack and data
+;; contexts to make mutation safe.
 (effect (multi amb) ; Mark the effect using "multi" specifier.
   ((control Flip) : unit -> bool))
   ; You use the "control" specifier to make this operation multi-shot.
@@ -609,8 +621,10 @@ type-checking strategies.
     ;; Provide the contexts!
     (c.api-key "top-secret-key!!!")
     (c.timeout 5000)
-    ;; Now use these contexts!
-    (action ())))
+    (block
+      (c.timeout 10000) ; Overwrites the 5000 timeout!
+      ;; Now use these contexts!
+      (action ()))))
 
 (with-mock-config #(fetch-user-data "user_miru")) ; Simple as that!
 
@@ -636,8 +650,8 @@ type-checking strategies.
   (match n
     0 `1 ; Quoting!
     1 x
-    _ `(* $(x) $(unroll (-n 1) x)))) ; Splicing values in place!
-    ;; $(<token>) IS splice not $<token>!
+    _ `(* $x $(unroll (-n 1) x)))) ; Splicing values in place!
+    ;; Both $(<token>) and $<token> are splices!
 
 ;; (expand ...) is a special form that runs ANY arbitrary computation at
 ;; compile time!
@@ -648,25 +662,21 @@ type-checking strategies.
 ;; you can prove that an index never leaves the array's bounds at compile-time!
 
 ;; Parameterizing length directly in the array type:
-(sig get-at : (forall 'a) .
-  ;; Refinement uses the pipe (|) operator.
-  (arr : (array 'a)) -> (i : int | (&& (>= i 0) (< i (Array/length arr)))) -> 'a)
-  ;; (Array/length arr) here works as a measure! More on measures and reflections
-  ;; later.
+(sig get-at : (arr : (array 'a)) -> (i : int | (&& (>= i 0) (< i (Array/length arr)))) -> 'a)
+;; Refinement uses the pipe (|) operator.
+;; (Array/length arr) here works as a reflected measure! More on measures and reflections later.
 
 ;; The compiler will ensure that 0 <= i < length(arr) always holds true.
 (let get-at [arr i]
   ;; The refinement allows us to remove runtime checks from this get call!
   (Array/get arr i))
 
-;; You can also move the predicate to an alias!
-;; Very similar to LiquidHaskell!
+;; You can also move the predicate to an alias! Very similar to LiquidHaskell!
 (predicate in-bounds [i arr]
   (&& (>= i 0) (< i (Array/length arr))))
 
-;; And use it:
-(sig get-at : (forall 'a) .
-  (arr : (array 'a)) -> (i : int | (in-bounds i arr)) -> 'a)
+;; And use it in the predicate position:
+(sig get-at : (arr : (array 'a)) -> (i : int | (in-bounds i arr)) -> 'a)
 ```
 
 TODO!
