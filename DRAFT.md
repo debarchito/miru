@@ -258,22 +258,22 @@ type-checking strategies.
 ;; Records are product types just like tuples. They are nominal by default but
 ;; can be made structural to explicitly enable row polymorphism.
 (type session
-  { id   : string
-    name : string }) ; the keys are untagged symbols!
+  { id   : string ; The keys are untagged symbols!
+    name : string })
 
 ;; This will be inferred as session. Anonymous definitions are illegal due
 ;; to the fundamental limitations of a nominal type.
 (let s1 { id "MIRU" name "Miru Session" })
 
-;; To opt into structural typing, append the row operator `| <row-variable>`.
+;; To opt into structural typing, append the row operator `..`.
 ;; This forces the compiler to treat the record as an open, anonymous shape
 ;; instead of binding it to a nominal definition.
-(let s2 { id "MIRU" name "Miru Session" | _ }) ; "_" is an ignored row variable.
+(let s2 { id "MIRU", name "Miru Session" .. }) ; Commas are whitespaces!
 
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
-;; We'll take any record as input that has an "id" field.
-(sig print-id : { id : string | _ } -> unit)
+;; We'll take any record as input that has an "id" field. < ... > are rows!
+(sig print-id : < id : string | _ > -> unit)
 (let print-id [record]
   (println (.id record))) ; Nominal types can seamlessly fit here!
 
@@ -337,14 +337,14 @@ type-checking strategies.
 ;; '<id> is reserved for type variables in Miru not quoting.
 ;; Infact, Miru only supports *typed* quasi-quoting using `(...) which
 ;; evaluate to an (expr 't) data-structure. More on them later!
-(type (shape 'r 's)
-  (Circle    : { radius : float | 'r }) ; Variant constructors must be capitalized!
-  (Rectangle : { width : float, height : float | 's })) ;
-  ;; To note, 'r1 and 'r2 are type variables and they are differentt from
+(type (shape 'r 's) ; Type variables turned row variables.
+  (Circle    : < radius : float | 'r >) ; Variant constructors must be capitalized!
+  (Rectangle : < width : float, height : float | 's >)) ;
+  ;; To note, 'r and 's are type variables and they are differentt from
   ;; locally abstract types, which we'll discuss below.
 
-(let [basic-circle { radius 5.0 | _ }
-      fancy-circle { radius 10.0 color "red" | _ }
+(let [basic-circle { radius 5.0 .. }
+      fancy-circle { radius 10.0 color "red" .. }
       shape-1 (Circle basic-circle)
       shape-2 (Circle fancy-circle)]) ; Both are valid!
 
@@ -412,7 +412,7 @@ type-checking strategies.
 ;; you would expect them to behave in OCaml! This is also powered using
 ;; row-polymorphism but extended to variants. They are open and can form
 ;; a structural union.
-(type small < :A :B >) ; < ... > are rows!
+(type small < :A :B >)
 (type large < :A :B :C (:D string) | _ >) ; They can have payloads!
 
 ;; They look a lot like keywords in Clojure but statically typed. Infact,
@@ -487,23 +487,23 @@ type-checking strategies.
   ;; internally powered by GADTs but lifted as a distinct language
   ;; feature for deeper syntactic and sementic integration.
 
-;; Now, let's write a handler for the function.
+;; Now, let's write a handle for the function.
 ;; It reduces the Console effect from the row!
 (sig mock-console : (unit -> string / <console | 'e>) -> string / <'e>)
 (let mock-console [action]
-  ;; Handlers are scope-bound and respond to changes within the current
+  ;; Handles are scope-bound and respond to changes within the current
   ;; scope and child scopes. with-expression allow us to eliminate deeply
   ;; nested code blocks caused by trailing closures, etc. More concrete
   ;; examples will follow soon. This is deeply inspired by Koka.
   (with
-    (handler
+    (handle
       ;; Tuples are commonly used for pairs.
       [(Write msg) k] ; k is the captured continuation!
          (block
            (println (String/concat "[WRITE]: " msg))
            (resume k ())) ; Resume the continuation!
       [(Read ()) k]
-         (resume k "Hello from the handler!")))
+         (resume k "Hello from the handle!")))
 
   ;; Now we can call the function without fear!
   (action ()))
@@ -536,12 +536,12 @@ type-checking strategies.
 (sig handle-amb : (unit -> 'a / <amb | 'e>) -> (list 'a) / <'e>)
 (let handle-amb [action]
   (with
-    (handler
+    (handle
       ;; Wrap the normal completion result in a list. This is special, and alse
       ;; known as the value clause.
       (Return v)
         :(v)
-      ;; Unlike Koka, you don't need to tell handler than Flip is a "control".
+      ;; Unlike Koka, you don't need to tell handle than Flip is a "control".
       ;; The compiler can inspect the signature either way.
       [(Flip ()) k]
         ;; Combine the results of both.
@@ -568,9 +568,9 @@ type-checking strategies.
   (:= (+ !s 2) s)
   !s)
 
-;; This is also the property that makes handlers much easier to write.
+;; This is also the property that makes handles much easier to write.
 (with
-  (handler
+  (handle
     [(Emit msg) k]
       (block
         (println "{msg}")
@@ -580,53 +580,35 @@ type-checking strategies.
 (Emit "2nd")
 
 ;; Would otherwise be something closer to:
-(handler
+(handle
   [(Emit msg) k]
       (block
         (println "{msg}")
         (resume k ())))
   (#((Emit "1st!")
-     (Emit "2nd"))) ;; This will get very tedious with nested handlers.
+     (Emit "2nd"))) ;; This will get very tedious with nested handles.
 
 ;; While algebraic effects track what a computation does downstream (outputs), 
 ;; Miru uses coeffects to track what a computation demands upstream (inputs). 
-;; Instead of bubbling up to a handler, coeffects represent dynamic contexts 
-;; injected down into the function before it can execute. We define them 
-;; using the "context" keyword.
-(context config
-  ;; These are lowercased because contexts/coeffects are represented internally
-  ;; as a struct with function fields just like how effects are modeled as GADTs
-  ;; with constructor fields. It makes it consistent with their internal
-  ;; represenation.
-  (api-key : string) ; Return types NOT encoded; they are not "normal" functions.
-  (timeout : int))
+;; Instead of bubbling up to a handle, coeffects represent dynamic contexts 
+;; injected down into the function before it can execute. 
 
-;; Miru tracks coeffect rows using a backslash `\`. 
-;; Just like effect, coeffects also support row-polymorphism.
-;; Each context may be assigned a name; it default to the name of the context
-;; otherwise.
-(sig fetch-user-data : string \ <c : config | _> -> string)
+;; Miru tracks coeffect rows using a backslash `\`. Just like effect, coeffects also
+;; support row-polymorphism.
+(sig fetch-user-data : string \ < api-key : string, timeout : int | _> -> string)
 (let fetch-user-data [user-id]
-  ;; We extract values from the context and can use the name binding!
-  (let key (c.api-key ())) ; For auto-inference, you could use config.api-key!
-  (let delay (c.timeout ()))
-  ;; IMAGINE a fetch function exists!
-  (fetch (format "https://api.example.com/{}?key={}&delay={}" user-id key delay)))
+  (let key \api-key) ; \<token> is how you read from a coeffect!
+  (let delay \timeout) ; This also helps the inference engine to infer coeffects.
+  (format "https://api.example.com/{}?key={}&delay={}" user-id key delay))
 
-;; To discharge coeffects, we use a provider block instead of a handler block.
-;; The "provide" keyword injects values downward, reducing "config" from the row!
-(sig with-mock-config : (unit -> 'a) \ <c : config | _> -> 'a)
-(let with-mock-config [action]
-  (provide
-    ;; Provide the contexts!
-    (c.api-key "top-secret-key!!!")
-    (c.timeout 5000)
-    (block
-      (c.timeout 10000) ; Overwrites the 5000 timeout!
-      ;; Now use these contexts!
-      (action ()))))
+;; To discharge coeffects, we use a provide block instead of a handle block.
+(let mock [action]
+  ;; The same ergonomics as with handle!
+  (with (provide { api-key "KEY123", delay 5000 .. }))
+  (with (provide { delay 10000 .. })) ; Overwrites the 5000 timeout!
+  (action ()))
 
-(with-mock-config #(fetch-user-data "user_miru")) ; Simple as that!
+(mock #(fetch-user-data "user_miru")) ; Simple as that!
 
 ;; It's nice to think it in terms of: you handle effects and provide contexts.
 ;; Effects capture dynamic control flow operations that bubble up the stack,
