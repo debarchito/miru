@@ -28,17 +28,17 @@ type-checking strategies.
 (let greet [name]
   (println (String/concat "Hello, " name)))
 
-;; You can specify the type definition using a (sig ...) expression.
+;; You can specify the type definition using a (val ...) expression.
 ;; The type signature are written in curried form. Type signatures use infix
 ;; forms which is how you would define them in mathematics. The type unit is
 ;; special because Miru doesn't have an equivalent of nil as a primitive.
 ;; Additionally, like most functional languages Miru lacks procedures. Every
 ;; function must return something even if it's an unit.
-(sig greet : string -> unit)
+(val greet : string -> unit)
 (let greet [name]
   ;; "<>" is a semigroup append function. Since string concatenation forms a
   ;; free semigroup, it behaves the same as String/concat!
-  (println (<> "Hello, " name))
+  (println "{}" (<> "Hello, " name))
   ;; "println" is not a function but a macro!
   ;; Modular implicits allow locally-resolved typeclass-like features.
   ;; More on them later.
@@ -47,10 +47,10 @@ type-checking strategies.
   (println (module String/Show) "This is the not the last hello, {}!" name)
   ;; You can also pass multiple modules!
   (println
-    (module String/Show) (module Int/Show)
+    (module Int/Show) (module String/Show) ; Order matters!
     "{} is pronounced {}" 1 "One")
   ;; Thus the semigroup function can also be written as:
-  (println (<> (module String/Append) "Hello, " name)))
+  (println (module String/Show) "{}" (<> (module String/Append) "Hello, " name)))
   ;; Implicits can consume explicits because Miru implements modular elaboration
   ;; i.e. implicits are desugared into explicits!
 
@@ -114,11 +114,9 @@ type-checking strategies.
       n (is-even? (- n 1)))))
 
 ;; Additionaly, let can also be used for destructuring.
-(let [x y z] [1 2.3 "hello!"])
-(print x) ; 1
-(print y) ; 2.3
-(print z) ; hello!
 ;; Almost all data structures can be destuctured!
+(let [x y z] [1 2.3 "hello!"])
+(println "{} {} {}" x y z) ; 1 2.3 hello!
 
 ;; Since functions are first-class you can always use lambdas.
 (let square (fn [x] (* x x)))
@@ -198,57 +196,57 @@ type-checking strategies.
 ;; :(...) in the reader phase to signal a heap-allocated tree layout.
 #set :(1 2 3) ; #set is a tagged template reader! More on them later.
 ;; or
-(Std/Collections/Set/from-array [| 1 2 3 |])
+(Base/Collections/Set/from-array [| 1 2 3 |])
 
 ;; Hashsets are mutable, non-persistent, unordered (hash-based) linear
 ;; collections. Uses flat vector delimiters [| ... |] to signify a contiguous
 ;; memory layout (Swiss Table!).
 #hash-set [| 1 2 3 |]
 ;; or
-(Std/Collections/Set/Hash/from-array [| 1 2 3 |])
+(Base/Collections/Set/Hash/from-array [| 1 2 3 |])
 
 ;; Sorted sets are immutable, persistent, value-ordered (Persistent B-Tree)
 ;; collections.
 #sorted-set :(1 2 3)
 ;; or
-(Std/Collections/Set/Sorted/from-array [| 1 2 3 |])
+(Base/Collections/Set/Sorted/from-array [| 1 2 3 |])
 
 ;; Ordered sets are immutable, persistent, insertion-ordered (Linked CHAMP)
 ;; collections.
 #ordered-set :(1 2 3)
 ;; or
-(Std/Collections/Set/Ordered/from-array [| 1 2 3 |])
+(Base/Collections/Set/Ordered/from-array [| 1 2 3 |])
 
 ;; Bit sets are mutable or unboxed, bitwise-packed sets of non-negative
 ;; integers.
 #bit-set [| 0 1 64 128 |]
 ;; or
-(Std/Collections/Set/Bit/from-array [| 0 1 64 128 |])
+(Base/Collections/Set/Bit/from-array [| 0 1 64 128 |])
 
 ;; Maps are immutable, persistent, purely applicative, unordered (CHAMP),
 ;; homogeneous key-value collections.
 #map { id 1 } ; Borrows the struct body form.
 ;; or
-(Std/Collections/Map/from-array [| ["id" 1] |])
+(Base/Collections/Map/from-array [| ["id" 1] |])
 
 ;; Hashmaps are mutable, non-persistent, unordered (hash-based) linear
 ;; key-value maps.
 #hash-map { id 1 }
 ;; or
-(Std/Collections/Map/Hash/from-array [| ["id" 1] |])
+(Base/Collections/Map/Hash/from-array [| ["id" 1] |])
 
 ;; Sorted maps are immutable, persistent, value-ordered (Persistent B-Tree)
 ;; key-value maps. Orders entries by key comparison to enable range queries
 ;; and bounds slicing.
 #sorted-map { id 1 }
 ;; or
-(Std/Collections/Map/Sorted/from-array [| ["id" 1] |])
+(Base/Collections/Map/Sorted/from-array [| ["id" 1] |])
 
 ;; Ordered maps are immutable, persistent, insertion-ordered (Linked CHAMP)
 ;; key-value maps.
 #ordered-map { id 1 }
 ;; or
-(Std/Collections/Map/Ordered/from-array [| ["id" 1] |])
+(Base/Collections/Map/Ordered/from-array [| ["id" 1] |])
 
 ;; The mutable hash-sets and hash-maps function as accumulators for the
 ;; persistent variants just like dynamic arrays function for tensors. That
@@ -273,13 +271,16 @@ type-checking strategies.
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
 ;; We'll take any record as input that has an "id" field. < ... > are rows!
-(sig print-id : < id : string | _ > -> unit)
+(val print-id : < id : string | _ > -> unit
 (let print-id [record]
   (println (.id record))) ; Nominal types can seamlessly fit here!
 
 ;; Both of these work!
 (print-id s1) ; s1 is nominal.
 (print-id s2) ; s2 is structural.
+
+;; .. is an alias for | _ at the type level; so you could write it as:
+(val print-id : < id : string .. > -> unit) 
 
 ;; While expressive, structural records come with their own set of performance
 ;; penalties. Nominal records can be represented as a single block of memory with
@@ -310,14 +311,11 @@ type-checking strategies.
 (let name (ref "Miru"))
 (println (ref.contents name)) ; Miru
 
-(ref.contents! "MIRU" name)
-;; This is also valid!
+(<- ref.contents "MIRU" name)
+;; This also works.
 (println (.contents name)) ; MIRU
 
-(<- ref.contents "MirU" name)
-(println (ref.contents name)) ; MirU
-
-;; This is a very useful construct and the stdlib will provide it by default.
+;; This is a very useful construct and the base will provide it by default.
 ;; Mutating and de-referencing is common enough that Miru has a built-in
 ;; functions for references, and a symbolic function for mutation. This is
 ;; similar to OCaml and Koka.
@@ -325,11 +323,11 @@ type-checking strategies.
 (println !name) ; Miru
 
 ;; The functions are implemented as follows:
-(sig (!) : (ref 'a) -> 'a)
+(val (!) : (ref 'a) -> 'a)
 (let (!) [container]
   (ref.contents container))
 
-(sig (:=) : 'a -> (ref 'a) -> unit)
+(val (:=) : 'a -> (ref 'a) -> unit)
 (let (:=) [value container]
   (<- ref.contents value container))
 
@@ -337,11 +335,8 @@ type-checking strategies.
 ;; '<id> is reserved for type variables in Miru not quoting.
 ;; Infact, Miru only supports *typed* quasi-quoting using `(...) which
 ;; evaluate to an (expr 't) data-structure. More on them later!
-(type (shape 'r 's) ; Type variables turned row variables.
-  (Circle    : < radius : float | 'r >) ; Variant constructors must be capitalized!
-  (Rectangle : < width : float, height : float | 's >)) ;
-  ;; To note, 'r and 's are type variables and they are differentt from
-  ;; locally abstract types, which we'll discuss below.
+(type shape
+  (Circle < radius : float .. >)) ; Variant constructors must be capitalized!
 
 (let [basic-circle { radius 5.0 .. }
       fancy-circle { radius 10.0 color "red" .. }
@@ -353,11 +348,11 @@ type-checking strategies.
   (White)
   Gray ; Parens are optional for constructors with no payload.
   (Black)
-  (RGB : [int int int]) ; Tuple variants are also allowed!
-  (HSL : { h int, s int, l int })) ; Record variants as usual.
+  (RGB [int int int]) ; Tuple variants are also allowed!
+  (HSL { h int, s int, l int })) ; Record variants as usual.
 
+;; The constructors are made available in the global space.
 (let a White)
-(let b (colors.Gray)) ; You can namespace them!
 (let b (RGB [240 80 40]))
 (let c (HSL { h 240, s 80, l 40 }))
 
@@ -385,22 +380,24 @@ type-checking strategies.
 (type (alias word) (option int)) ; Why would anyone want an optional word :}
 
 ;; We can also use (and ...) for mutually recursive types!
-;; Types also require the "rec" specifier. Implicit recursion is not allowed.
+;; Types also require the "rec" specifier. Implicit recursion is not allowed
+;; anywhere.
 (and
   (type (rec expression)
-    (Literal  : int)
-    (Variable : string)
-    (Block    : (list statement)))
+    (Literal  int)
+    (Variable string)
+    (Block    (list statement)))
   (type (rec statement)
-    (Assignment      : [string expression])
-    (If-then-else    : [expression statement statement])
-    (Void-expression : expression)))
+    (Assignment      [string expression])
+    (If-then-else    [expression statement statement])
+    (Void-expression expression)))
 
-;; Let's build a tree for an example! "a" here is again a type variable.
+;; Let's build a tree for an example!
 (type (tree 'a)
   Empty
-  (Node : [(tree 'a) 'a (tree 'a)]))
+  (Node [(tree 'a) 'a (tree 'a)]))
 
+;; And use it.
 (let example-tree
   (Node [
     (Node [Empty 7 Empty])
@@ -413,7 +410,7 @@ type-checking strategies.
 ;; row-polymorphism but extended to variants. They are open and can form
 ;; a structural union.
 (type small < :A :B >)
-(type large < :A :B :C (:D string) | _ >) ; They can have payloads!
+(type large < :A :B :C (:D string) .. >) ; They can have payloads!
 
 ;; They look a lot like keywords in Clojure but statically typed. Infact,
 ;; they are a drop-in replacement for a lot of cases where you'd
@@ -436,13 +433,14 @@ type-checking strategies.
   < :White
     :Gray
     :Black
-    (:RGB : [int int int])
-    (:HSL : { h int, s int, l int }) >)
+    (:RGB [int int int])
+    (:HSL { h int, s int, l int }) >)
 
 ;; Time to introduce GADTs!
 ;; For this e.g., let's model an expresssion evaluator.
 (type (exp _) ; The type variable we'll specialize.
-  ; You MUST specify the returning type. Specialization is explicit!
+  ;; Notice the ":" after the constructor. You MUST specify the returning
+  ;; type. Specialization is explicit!
   (Int     : int                   -> (exp int))
   (Bool    : bool                  -> (exp bool))
   (Add     : [(exp int) (exp int)] -> (exp int))
@@ -453,7 +451,7 @@ type-checking strategies.
 ;; with any type, while a locally abstract type creates a rigid, newly
 ;; minted type identity scoped strictly inside that function. They are what
 ;; enable local type refinement which is crucial to make GADTs work!
-(sig eval : (type a) . (exp a) -> a)
+(val eval : (type a) . (exp a) -> a)
 (let (rec eval) [e] ; The "rec" specifier is a property of the binding!
   ;; The abstract type "a" is refined in the branches!
   (match e
@@ -468,96 +466,148 @@ type-checking strategies.
 (let bad-exp (Add (Int 5) (Bool true))) 
 ;;                        ^^^^^^^^^^^ Expected (exp int), got (exp bool)
 
-;; Let me introduce you the crown jewel: effects.
-;; We define a simple effect with two distinct effect operations.
-(effect console
-  ;; Return types NOT encoded; they are not "normal" functions.
-  (Read  : unit -> string) 
-  (Write : string -> unit))
+;; Let me introduce you the crown jewel: effects. We define a simple
+;; effect with two distinct effect operations. There are different kinds of
+;; effect operation types: direct operations, one-shot controls, tail-resuming
+;; one-shot controls, and muli-shot controls.
+(effect (state 'a)
+  ;; These are examples of direct operations. They are used when you want to
+  ;; perform an operation and return a value directly back to the perform site.
+  ;; They can resume exactly once and have no access to a continuation. They read
+  ;; and are typed exactly like functions.
+  (val get : unit -> 'a) 
+  (val set : 'a -> unit))
 
-;; Now, we define a function that performs the Console effect.
-;; Miru tracks the set of effect types as effect rows.
-;; | _ is required to keep the function open to composition.
-(sig prompt-user : string -> string / <console | _>)
-(let prompt-user [msg]
-  ;; Effect calls look like function calls.
-  (Write msg)
-  (console.Read ())) ; You can also namespace them.
-  ;; They look very similar to ADTs, right? Exactly! They are
-  ;; internally powered by GADTs but lifted as a distinct language
-  ;; feature for deeper syntactic and sementic integration.
+;; Now, we define a function that performs the console effect.
+;; Miru tracks the set of effect types as effect rows. They support row-polymorphism.
+(val increment-by : int -> int / < (state int) .. >)
+(let increment-by [amount]
+  (let current (get ()))
+  (set (+ current amount))
+  (get ()))
 
-;; Now, let's write a handle for the function.
-;; It reduces the Console effect from the row!
-(sig mock-console : (unit -> string / <console | 'e>) -> string / <'e>)
-(let mock-console [action]
-  ;; Handles are scope-bound and respond to changes within the current
-  ;; scope and child scopes. with-expression allow us to eliminate deeply
-  ;; nested code blocks caused by trailing closures, etc. More concrete
-  ;; examples will follow soon. This is deeply inspired by Koka.
+;; Now, let's write a handle for the function. It reduces the state effect
+;; from the row using row variables.
+(val run-state : (int -> int / < (state int) | 'e>) -> int / < 'e >)
+(let run-state [init action]
+  (let state (ref init))
+
+  ;; with-expressions allow us to eliminate deeply nested code blocks caused
+  ;; by trailing closures, etc. More concrete examples will follow soon.
   (with
     (handle
-      ;; Tuples are commonly used for pairs.
-      [(Write msg) k] ; k is the captured continuation!
-         (block
-           (println (String/concat "[WRITE]: " msg))
-           (resume k ())) ; Resume the continuation!
-      [(Read ()) k]
-         (resume k "Hello from the handle!")))
+      (get ()) !state
+      (set x)  (:= x state))))
 
   ;; Now we can call the function without fear!
   (action ()))
 
 ;; #(...) are anonymous functions.
-(let res (mock-console #(prompt-user "Enter command")))
-(println res)
+(let res (run-state 10 #(increment-by 5)))
+(println "{}" res) ; 15
 
-;; Miru effects are stackful and one-shot by default. It covers almost all
-;; of the cases you'd use effects for. However, there are scenarios where
-;; stackless state machines are inherently more efficient. I might consider
-;; a special compiler tag to opt-into stack lifting in the future.
+;; Control operations capture the delimited continuation `k` at the perform site.
+;; Like Koka, control operations default to one-shot resumptions: `k` can be
+;; called at MOST ONCE (0 times to abort, or 1 time to resume).
 
-;; Multi-shot effects are opt-in and are always stackful due to their nature.
-;; Multi-shot are expensive because Miru explicitly clones the stack and data
-;; contexts to make mutation safe.
-(effect (multi amb) ; Mark the effect using "multi" specifier.
-  ((control Flip) : unit -> bool))
-  ; You use the "control" specifier to make this operation multi-shot.
+;; Lets model generators!
+(effect (gen 'a)
+  (control yield : 'a -> unit))
 
-;; Let's look at a function that takes a number and adds either 10 or 0
-;; depending on the flip.
-;; Because it is multi-shot, this function will internally return *twice*.
-(sig choices : int -> int / <amb | _>)
+;; A function that performs the generator effect.
+(val range : int -> int -> unit / < (gen int) .. >)
+(let range [start end]
+  (if (<= start end)
+    (block
+      (yield start)
+      (range (+ start 1) end))
+    ()))
+
+(val run-print-gen : (unit -> unit / < (gen int) | 'e >) -> unit / < 'e >)
+(let run-print-gen [action]
+  (with (yield item) ; Syntactic sugar for a single-operation effect handle!
+    (println "Yielded: {}" item)
+    (resume ()))
+ 
+  (action ()))
+
+(run-print-gen #(range 1 3))
+;; Output:
+;; Yielded: 1
+;; Yielded: 2
+;; Yielded: 3
+
+;; A final control is explicitly non-resumptive; invoking resume inside its handle
+;; causes a compile-time error. This allows the compiler to optimize the operation
+;; as a non-local jump.
+
+;; For example, we can model exceptions using final controls.
+(effect (exn 'e)
+  (final throw : 'e -> 'a))
+
+(val parse-age : int -> int / < (exn string) .. >)
+(let parse-age [age]
+  (if (< age 0)
+    (throw "Age cannot be negative")
+    age))
+
+;; A simple example to turn exceptions into options.
+(val run-exn : (unit -> 'a / < (exn string) | 'e >) -> (option 'a) / < 'e >)
+(let run-exn [action]
+  (with (throw err)
+    (println "Caught error: {}" err)
+    None) ; We cannot use resume here.
+  
+  (Some (action ())))
+
+(let res1 (run-exn #(+ (parse-age -5) 100)))
+(println "{}" res1) ; None
+
+;; Multi-shot effects are opt-in at the effect level using the `multi` modifier.
+;; Because multi-shot operations clone stack frames and data contexts to preserve 
+;; purity across branches, marking the entire effect as `multi` signals to the compiler
+;; that stack-cloning machinery is required.
+(effect (multi amb)
+  ;; Now this control has multi-shot capabilities.
+  (control flip : unit -> bool))
+
+;; Because it performs a multi-shot effect, this branch will evaluate and
+;; return multiple times during handling.
+(val choices : int -> int / < amb .. >)
 (let choices [x]
-  (if (Flip ())
+  (if (flip ())
     (+ x 10)
     (+ x 0)))
 
-(sig handle-amb : (unit -> 'a / <amb | 'e>) -> (list 'a) / <'e>)
+;; Handler for non-deterministic choice using `with`.
+;; Handlers handling multi-shot effects require a `return` clause (value clause)
+;; to wrap the base leaf results into a collection.
+(val handle-amb : (unit -> 'a / < amb | 'e >) -> (list 'a) / < 'e >)
 (let handle-amb [action]
   (with
     (handle
-      ;; Wrap the normal completion result in a list. This is special, and alse
+      ;; Wrap the normal completion result in a list. This is special, and also
       ;; known as the value clause.
-      (Return v)
+      (return v)
         :(v)
-      ;; Unlike Koka, you don't need to tell handle than Flip is a "control".
-      ;; The compiler can inspect the signature either way.
-      [(Flip ()) k]
-        ;; Combine the results of both.
-        (<> (resume k true) (resume k false))))
+
+      (flip ())
+        ;; Combine the results of both forks.
+        (<> (resume true) (resume false))))
+
   (action ()))
 
 (let res (handle-amb #(choices 5)))
-(println res) ; :(15 5)
+(println "{}" res) ; :(15 5)
 
 ;; Let's take a bit of time to understand the with-expression. Here are some
 ;; cases. First is the case for a scoped resource manager.
 (let count-steps [()]
-  (scoped 0 #(block
-                (:= (+ !% 1) %)
-                (:= (+ !% 2) %)
-                !%)))
+  (scoped 0
+    #(block
+      (:= (+ !% 1) %)
+      (:= (+ !% 2) %)
+      !%)))
 
 ;; That's a lot of nesting. Now let's rewrite it with with-expression.
 ;; This makes the code very linear. with-expression takes advantage of the
@@ -571,22 +621,23 @@ type-checking strategies.
 ;; This is also the property that makes handles much easier to write.
 (with
   (handle
-    [(Emit msg) k]
+    (emit msg)
       (block
-        (println "{msg}")
-        (resume k ()))))
+        (println "{}" msg)
+        (resume ()))))
 
-(Emit "1st!")
-(Emit "2nd")
+(emit "1st!")
+(emit "2nd")
 
 ;; Would otherwise be something closer to:
 (handle
-  [(Emit msg) k]
-      (block
-        (println "{msg}")
-        (resume k ())))
-  (#((Emit "1st!")
-     (Emit "2nd"))) ;; This will get very tedious with nested handles.
+  (emit msg)
+    (block
+      (println "{}" msg)
+      (resume ()))
+  #(block
+    (emit "1st!")
+    (emit "2nd"))) ;; This will get very tedious with nested handles.
 
 ;; While algebraic effects track what a computation does downstream (outputs), 
 ;; Miru uses coeffects to track what a computation demands upstream (inputs). 
@@ -595,7 +646,7 @@ type-checking strategies.
 
 ;; Miru tracks coeffect rows using a backslash `\`. Just like effect, coeffects also
 ;; support row-polymorphism.
-(sig fetch-user-data : string \ < api-key : string, timeout : int | _> -> string)
+(val fetch-user-data : string \ < api-key : string, timeout : int .. > -> string)
 (let fetch-user-data [user-id]
   (let key \api-key) ; \<token> is how you read from a coeffect!
   (let delay \timeout) ; This also helps the inference engine to infer coeffects.
@@ -627,7 +678,7 @@ type-checking strategies.
 
 ;; These are just normal Miru functions that modify (expr a) just like any
 ;; other data structure! It is also known as multi-stage expansion.
-(sig unroll : int -> (expr int) -> (expr int))
+(val unroll : int -> (expr int) -> (expr int))
 (let (rec unroll) [n x] 
   (match n
     0 `1 ; Quoting!
@@ -644,7 +695,7 @@ type-checking strategies.
 ;; you can prove that an index never leaves the array's bounds at compile-time!
 
 ;; Parameterizing length directly in the array type:
-(sig get-at : (arr : (array 'a)) -> (i : int | (&& (>= i 0) (< i (Array/length arr)))) -> 'a)
+(val get-at : (arr : (array 'a)) -> (i : int | (&& (>= i 0) (< i (Array/length arr)))) -> 'a)
 ;; Refinement uses the pipe (|) operator.
 ;; (Array/length arr) here works as a reflected measure! More on measures and reflections later.
 
@@ -658,7 +709,7 @@ type-checking strategies.
   (&& (>= i 0) (< i (Array/length arr))))
 
 ;; And use it in the predicate position:
-(sig get-at : (arr : (array 'a)) -> (i : int | (in-bounds i arr)) -> 'a)
+(val get-at : (arr : (array 'a)) -> (i : int | (in-bounds i arr)) -> 'a)
 ```
 
 TODO!
