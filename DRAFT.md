@@ -36,23 +36,14 @@ type-checking strategies.
 ;; function must return something even if it's an unit.
 (val greet : string -> unit)
 (let greet [name]
+  ;; f-strings are special format strings! They are desugared into
+  ;; GADT-powered contexts, very similar to OCaml and Haskell!
   ;; "<>" is a semigroup append function. Since string concatenation forms a
   ;; free semigroup, it behaves the same as String/concat!
-  (println "{}" (<> "Hello, " name))
-  ;; "println" is not a function but a macro!
+  (println f"{}" (<> "Hello, " name))
   ;; Modular implicits allow locally-resolved typeclass-like features.
-  ;; More on them later.
-  (println "I've been greeting a lot today, isn't it {}?" name)
-  ;; You can also use explicits; often called module-dependent functions.
-  (println (module String/Show) "This is the not the last hello, {}!" name)
-  ;; You can also pass multiple modules!
-  (println
-    (module Int/Show) (module String/Show) ; Order matters!
-    "{} is pronounced {}" 1 "One")
-  ;; Thus the semigroup function can also be written as:
-  (println (module String/Show) "{}" (<> (module String/Append) "Hello, " name)))
-  ;; Implicits can consume explicits because Miru implements modular elaboration
-  ;; i.e. implicits are desugared into explicits!
+  ;; You can also insert the value inside the {...}!
+  (println f"I've been greeting a lot today, isn't it {name}?"))
 
 ;; Recursive functions need to be marked with a "rec" specifier.
 ;; Specifiers are special positional properties attached to labels.
@@ -125,9 +116,6 @@ type-checking strategies.
 ;; They must be defined inside a (...)
 (let (~/) [x] (/ 1.0 x))
 (~/ 4.0) ; 0.25
-
-;; Symbolic functions with one arguments can be directly prefixed!
-(print "{}" ~/4.0)
 
 ;; Miru has a lot of data structures. Let's take a look at some of them:
 
@@ -318,15 +306,11 @@ type-checking strategies.
 ;; This is a very useful construct and the base will provide it by default.
 ;; Mutating and de-referencing is common enough that Miru has a built-in
 ;; functions for references, and a symbolic function for mutation. This is
-;; similar to OCaml and Koka.
+;; similar to OCaml and Koka. !<id> is implemented as a special reader.
 (:= "Miru" name)
 (println !name) ; Miru
 
-;; The functions are implemented as follows:
-(val (!) : (ref 'a) -> 'a)
-(let (!) [container]
-  (ref.contents container))
-
+;; The := function is implemented as follows:
 (val (:=) : 'a -> (ref 'a) -> unit)
 (let (:=) [value container]
   (<- ref.contents value container))
@@ -676,18 +660,17 @@ type-checking strategies.
 ;; inspiration from MetaOCaml to implement expression values, and the two
 ;; basic constructs to build them: quoting and splicing.
 
-;; These are just normal Miru functions that modify (expr a) just like any
+;; These are just normal Miru functions that modify (expr 'a) just like any
 ;; other data structure! It is also known as multi-stage expansion.
 (val unroll : int -> (expr int) -> (expr int))
 (let (rec unroll) [n x] 
   (match n
     0 `1 ; Quoting!
     1 x
-    _ `(* $x $(unroll (-n 1) x)))) ; Splicing values in place!
-    ;; Both $(<token>) and $<token> are splices!
+    _ `(* $x $(unroll (-n 1) x)))) ; Both $(<token>) and $<token> are splices!
 
-;; (expand ...) is a special form that runs ANY arbitrary computation at
-;; compile time!
+;; (expand ...) is a special form that evaluates ANY (expr 'a) and inlines it at
+;; compile-time.
 (let value (expand (unroll 4 `3))) ; (* 3 (* 3 (* 3 (* 3 1))))
 
 ;; Miru integrates SMT solvers to provide native support for Liquid Refinement
@@ -704,8 +687,8 @@ type-checking strategies.
   ;; The refinement allows us to remove runtime checks from this get call!
   (Array/get arr i))
 
-;; You can also move the predicate to an alias! Very similar to LiquidHaskell!
-(predicate in-bounds [i arr]
+;; You can also move the predicates into claims! Very similar to LiquidHaskell's predicates.
+(claim in-bounds [i arr]
   (&& (>= i 0) (< i (Array/length arr))))
 
 ;; And use it in the predicate position:
