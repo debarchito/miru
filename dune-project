@@ -20,6 +20,8 @@
  (depends
   (ocaml
    (>= "5.5.0"))
+  (ppx_deriving
+   (>= "6.1.3"))
   (asai
    (>= "0.3.1"))
   (alcotest

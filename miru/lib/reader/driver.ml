@@ -38,8 +38,6 @@ and read_forms_until rt s close =
     | f ->
         f :: read_forms_until rt s close )
 
-(* --- standard macros --- *)
-
 and read_quote_macro rt s _ =
   match read_form rt s with Form.Empty -> Form.Empty | f -> Form.Quote f
 
@@ -59,13 +57,152 @@ and read_deref_macro rt s _ =
   | Form.Empty ->
       Form.Empty
   | f ->
-      Form.List [Form.Symbol "deref"; f]
+      Form.Call [Form.Symbol "deref"; f]
 
 and read_comment_macro rt s _ = Stream.skip_to_eol s ; read_form rt s
 
 and read_string_macro _rt s _ = Lexer.read_string_body s
 
 and read_list_macro rt s _ = read_type_form (read_forms_until rt s ')')
+
+and resolve_raw_record = function
+  | Form.RawRecord forms ->
+      record_value_of_forms forms
+  | other ->
+      other
+
+and read_let_form = function
+  | [Form.Symbol "let"; Form.Symbol name; value] ->
+      Form.Let {name= Form.Symbol name; body= resolve_raw_record value}
+  | Form.Symbol "let" :: Form.Symbol name :: Form.RecordValue fields :: body ->
+      let args = List.map snd fields in
+      let fn_body = curry_fn args (build_fn_body body) in
+      Form.Let {name= Form.Symbol name; body= fn_body}
+  | Form.Symbol "let" :: Form.Symbol name :: Form.RawRecord forms :: body ->
+      let args =
+        List.map snd
+          ( match record_value_of_forms forms with
+          | Form.RecordValue p ->
+              p
+          | _ ->
+              [] )
+      in
+      let fn_body =
+        curry_fn args (build_fn_body (List.map resolve_raw_record body))
+      in
+      Form.Let {name= Form.Symbol name; body= fn_body}
+  | Form.Symbol "let"
+    :: Form.Specifier (spec, Form.Symbol name)
+    :: Form.RecordValue fields
+    :: body ->
+      let args = List.map snd fields in
+      let fn_body = curry_fn args (build_fn_body body) in
+      Form.Let
+        { name= Form.Specifier (spec, Form.Symbol name)
+        ; body= fn_body }
+  | Form.Symbol "let"
+    :: Form.Specifier (spec, Form.Symbol name)
+    :: Form.RawRecord forms
+    :: body ->
+      let args =
+        List.map snd
+          ( match record_value_of_forms forms with
+          | Form.RecordValue p ->
+              p
+          | _ ->
+              [] )
+      in
+      let fn_body =
+        curry_fn args (build_fn_body (List.map resolve_raw_record body))
+      in
+      Form.Let
+        { name= Form.Specifier (spec, Form.Symbol name)
+        ; body= fn_body }
+  | [Form.Symbol "let"; Form.RawRecord forms; value] ->
+      let pat = record_match_of_forms forms in
+      Form.Let {name= pat; body= resolve_raw_record value}
+  | [Form.Symbol "let"; Form.RecordMatch _; _] as l -> (
+    match l with
+    | [_; pat; value] ->
+        Form.Let {name= pat; body= value}
+    | _ ->
+        Form.Call l )
+  | [Form.Symbol "let"; Form.RecordValue pat_fields; value] ->
+      Form.Let
+        {name= Form.RecordMatch pat_fields; body= resolve_raw_record value}
+  | Form.Symbol "let" :: Form.RecordValue pat_fields :: value :: body ->
+      Form.Let
+        { name= Form.RecordMatch pat_fields
+        ; body= build_fn_body (List.map resolve_raw_record (value :: body)) }
+  | [Form.Symbol "let"; Form.RecordValue fields] ->
+      let pairs =
+        let rec go = function
+          | (_, name) :: (_, value) :: rest ->
+              (name, value) :: go rest
+          | [] ->
+              []
+          | _ ->
+              failwith "multi-binding: odd number of forms"
+        in
+        go fields
+      in
+      let bindings =
+        List.map (fun (name, value) -> Form.Let {name; body= value}) pairs
+      in
+      Form.Sequence bindings
+  | [Form.Symbol "let"; Form.RawRecord forms] ->
+      let bindings =
+        let rec go = function
+          | name :: value :: rest ->
+              Form.Let {name; body= value} :: go rest
+          | [] ->
+              []
+          | _ ->
+              failwith "multi-binding: odd number of forms"
+        in
+        go forms
+      in
+      Form.Sequence bindings
+  | forms ->
+      raise
+        (Err.Reader_error
+           ( None
+           , Err.Message.InvalidForm
+           , Printf.sprintf "invalid 'let' form: %d arguments"
+               (List.length forms) ) )
+
+and curry_fn args body =
+  match args with
+  | [] ->
+      body
+  | [a] ->
+      Form.Fn (a, body)
+  | a :: rest ->
+      Form.Fn (a, curry_fn rest body)
+
+and build_fn_body = function
+  | [] ->
+      Form.Unit
+  | [single] ->
+      single
+  | multiple ->
+      Form.Sequence multiple
+
+and read_fn_form = function
+  | Form.Symbol "fn" :: Form.RecordValue fields :: body ->
+      let args = List.map snd fields in
+      curry_fn args (build_fn_body body)
+  | Form.Symbol "fn" :: Form.RawRecord forms :: body ->
+      let args =
+        match record_value_of_forms forms with
+        | Form.RecordValue fields ->
+            List.map snd fields
+        | _ ->
+            []
+      in
+      curry_fn args (build_fn_body (List.map resolve_raw_record body))
+  | _ ->
+      failwith "invalid fn form"
 
 and read_type_form =
   let is_positional = function
@@ -75,9 +212,11 @@ and read_type_form =
         false
   in
   let rec wrap_type = function
-    | Form.RecordExpression pairs ->
-        Form.RecordExpression (List.map (fun (k, v) -> (k, wrap_type v)) pairs)
-    | Form.List items -> (
+    | Form.RecordValue pairs ->
+        Form.RecordValue (List.map (fun (k, v) -> (k, wrap_type v)) pairs)
+    | Form.RawRecord forms ->
+        wrap_type (record_value_of_forms forms)
+    | Form.Call items -> (
       match List.map wrap_type items with
       | [] ->
           Form.Type Form.Unit
@@ -90,28 +229,52 @@ and read_type_form =
               | Form.Type (Form.Symbol s) ->
                   Form.TypeApplication (s, acc)
               | _ ->
-                  Form.Type (Form.List items) )
+                  Form.Type (Form.Call items) )
             base rest )
     | other ->
         Form.Type other
   in
   function
-  | [Form.Symbol "type"; Form.Symbol name; Form.RecordExpression fields] ->
+  | Form.Symbol "let" :: rest ->
+      read_let_form (Form.Symbol "let" :: rest)
+  | Form.Symbol "fn" :: _ as forms ->
+      read_fn_form forms
+  | Form.Symbol "block" :: body ->
+      Form.Block body
+  | [Form.Symbol "type"; Form.Symbol name; Form.RecordValue fields] ->
       if is_positional fields then
         Form.AbstractType
           ( name
-          , Form.RecordExpression
-              (List.map (fun (k, v) -> (k, wrap_type v)) fields) )
+          , Form.RecordValue (List.map (fun (k, v) -> (k, wrap_type v)) fields)
+          )
       else
         Form.Record
           ( name
-          , Form.RecordExpression
-              (List.map (fun (k, v) -> (k, wrap_type v)) fields) )
+          , Form.RecordValue (List.map (fun (k, v) -> (k, wrap_type v)) fields)
+          )
+  | [Form.Symbol "type"; Form.Symbol name; Form.RawRecord forms] ->
+      let fields =
+        match record_value_of_forms forms with
+        | Form.RecordValue p ->
+            p
+        | _ ->
+            []
+      in
+      if is_positional fields then
+        Form.AbstractType
+          ( name
+          , Form.RecordValue (List.map (fun (k, v) -> (k, wrap_type v)) fields)
+          )
+      else
+        Form.Record
+          ( name
+          , Form.RecordValue (List.map (fun (k, v) -> (k, wrap_type v)) fields)
+          )
   | Form.Symbol "type" :: Form.Symbol name :: constructors -> (
     match constructors with
     | [single] -> (
       match single with
-      | Form.List (Form.Symbol ctor :: payload) ->
+      | Form.Call (Form.Symbol ctor :: payload) ->
           let payload_type =
             match payload with
             | [] ->
@@ -119,7 +282,7 @@ and read_type_form =
             | [f] ->
                 Some (wrap_type f)
             | fs ->
-                Some (wrap_type (Form.List fs))
+                Some (wrap_type (Form.Call fs))
           in
           Form.Variant (name, [Form.Constructor (ctor, payload_type)])
       | _ ->
@@ -136,7 +299,7 @@ and read_type_form =
                 process_ctors
                   (Form.Constructor (ctor, Some (wrap_type payload)) :: acc)
                   rest' )
-          | Form.List (Form.Symbol ctor :: payload) :: rest ->
+          | Form.Call (Form.Symbol ctor :: payload) :: rest ->
               let payload_type =
                 match payload with
                 | [] ->
@@ -144,7 +307,7 @@ and read_type_form =
                 | [f] ->
                     Some (wrap_type f)
                 | fs ->
-                    Some (wrap_type (Form.List fs))
+                    Some (wrap_type (Form.Call fs))
               in
               process_ctors (Form.Constructor (ctor, payload_type) :: acc) rest
           | _ :: rest ->
@@ -153,12 +316,15 @@ and read_type_form =
               List.rev acc
         in
         Form.Variant (name, process_ctors [] constructors) )
+  | Form.Symbol spec :: arg :: rest when spec = "rec" || spec = "mut" ->
+      let arg' = if spec = "mut" then Form.Field arg else arg in
+      Form.Specifier (spec, arg')
   | forms ->
-      Form.List forms
+      Form.Call (List.map resolve_raw_record forms)
 
 and read_tuple_macro rt s _ =
   let items = read_forms_until rt s ']' in
-  Form.RecordExpression
+  Form.RecordValue
     (List.mapi (fun i v -> (Form.Field (Form.Int (Int64.of_int i)), v)) items)
 
 and read_struct_macro rt s _ =
@@ -175,65 +341,66 @@ and read_struct_macro rt s _ =
         ignore (Stream.read s) ;
         List.rev acc
     | Some _ -> (
-        let cap = Stream.capture s in
-        let span = Stream.captured_point_range s cap in
-        match read_form rt s with
-        | Form.Empty ->
-            read_forms acc
-        | f ->
-            read_forms ((span, f) :: acc) )
+      match read_form rt s with
+      | Form.Empty ->
+          read_forms acc
+      | f ->
+          read_forms (f :: acc) )
   in
-  let rec resolve_mutable = function
-    | (_, Form.Symbol "mutable") :: (span, Form.Symbol x) :: rest ->
-        (span, Form.MutableField x) :: resolve_mutable rest
-    | (_, Form.Symbol "mutable") :: (span, Form.Int k) :: rest ->
-        (span, Form.MutableField (Int64.to_string k)) :: resolve_mutable rest
-    | (_, Form.Symbol "mutable") :: (span, Form.String _) :: _ ->
-        raise
-          (Err.Reader_error
-             ( span
-             , Err.Message.InvalidMutableFieldKey
-             , "mutable field keys must be symbols or integers, got string" ) )
-    | (_, Form.Symbol "mutable") :: (span, _) :: _ ->
-        raise
-          (Err.Reader_error
-             ( span
-             , Err.Message.InvalidMutableFieldKey
-             , "mutable field keys must be symbols or integers, got other" ) )
-    | (_, Form.Symbol "mutable") :: [] ->
-        []
-    | x :: rest ->
-        x :: resolve_mutable rest
-    | [] ->
-        []
-  in
-  let forms = resolve_mutable (read_forms []) in
+  let forms = read_forms [] in
+  Form.RawRecord forms
+
+and record_value_of_forms forms =
   let rec pair acc = function
     | [] ->
-        Form.RecordExpression (List.rev acc)
-    | [(_, Form.Symbol "mutable")] ->
-        Form.RecordExpression (List.rev acc)
-    | [(span, _)] ->
+        Form.RecordValue (List.rev acc)
+    | [f] ->
         raise
           (Err.Reader_error
-             ( span
+             ( None
              , Err.Message.OddStructBody
              , "struct body has odd number of forms" ) )
-    | (_, Form.Symbol k) :: (_, v) :: rest ->
-        pair ((Form.Field (Form.Symbol k), v) :: acc) rest
-    | (_, Form.Int k) :: (_, v) :: rest ->
-        pair ((Form.Field (Form.Int k), v) :: acc) rest
-    | (_, (Form.MutableField _ as k)) :: (_, v) :: rest ->
-        pair ((k, v) :: acc) rest
-    | (span, _) :: _ :: _ ->
+    | Form.Call (Form.Symbol "=" :: _) :: _ ->
         raise
           (Err.Reader_error
-             ( span
+             ( None
              , Err.Message.InvalidFieldKey
-             , "struct field keys must be symbols or integers" ) )
+             , "(= x y) is only valid in record match, not record value" ) )
+    | Form.Symbol k :: v :: rest ->
+        pair ((Form.Field (Form.Symbol k), v) :: acc) rest
+    | Form.Int k :: v :: rest ->
+        pair ((Form.Field (Form.Int k), v) :: acc) rest
+    | k :: v :: rest ->
+        pair ((k, v) :: acc) rest
   in
   pair [] forms
-
+and record_match_of_forms forms =
+  let rec pair acc = function
+    | [] ->
+        Form.RecordMatch (List.rev acc)
+    | [Form.Symbol name] ->
+        Form.RecordMatch
+          (List.rev ((Form.Field (Form.Symbol name), Form.Symbol name) :: acc))
+    | [Form.Call [Form.Symbol "="; Form.Symbol src; Form.Symbol dst]] ->
+        Form.RecordMatch
+          (List.rev ((Form.Field (Form.Symbol src), Form.Symbol dst) :: acc))
+    | [f] ->
+        raise
+          (Err.Reader_error
+             ( None
+             , Err.Message.OddStructBody
+             , "match body has odd number of forms" ) )
+    | Form.Symbol name :: rest ->
+        pair
+          ((Form.Field (Form.Symbol name), Form.Symbol name) :: acc)
+          rest
+    | (Form.Call [Form.Symbol "="; Form.Symbol src; Form.Symbol dst])
+      :: rest ->
+        pair ((Form.Field (Form.Symbol src), Form.Symbol dst) :: acc) rest
+    | k :: v :: rest ->
+        pair ((k, v) :: acc) rest
+  in
+  pair [] forms
 and read_close_error s c =
   raise
     (Err.Reader_error
@@ -241,17 +408,20 @@ and read_close_error s c =
        , Err.Message.UnexpectedClose
        , Printf.sprintf "unexpected '%c'" c ) )
 
-(* --- untagged dispatch bodies --- *)
-
-and read_fn_dispatch rt s _ = Form.Fn (read_forms_until rt s ')')
+and read_fn_dispatch rt s _ =
+  let forms = read_forms_until rt s ')' in
+  match forms with
+  | Form.RecordValue fields :: body ->
+      let args = List.map snd fields in
+      curry_fn args (build_fn_body body)
+  | _ ->
+      Form.Fn (Form.Unit, build_fn_body forms)
 
 and read_array_dispatch rt s _ =
-  Form.List (Form.Symbol "array" :: read_forms_until rt s ']')
+  Form.Call (Form.Symbol "array" :: read_forms_until rt s ']')
 
 and read_set_dispatch rt s _ =
-  Form.List (Form.Symbol "set" :: read_forms_until rt s '}')
-
-(* --- '#' dispatch: untagged vs tagged --- *)
+  Form.Call (Form.Symbol "set" :: read_forms_until rt s '}')
 
 and read_dispatch_macro rt s _ =
   match Stream.peek s with

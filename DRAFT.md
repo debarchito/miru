@@ -72,7 +72,8 @@ type-checking strategies.
 (inc-2 3) ; 5
 
 ;; This makes composition really clean.
-(let new-list (map (* 2) [1 2 3 4])) ; [2 4 6 8]
+;; :(...) are lists!
+(let new-list (map (* 2) :(1 2 3 4)) ; :(2 4 6 8)
 
 ;; You can use (block ...) to group multiples expressions in a single block.
 ;; let uses sequential binding, similar to let* in Scheme. They are similar to

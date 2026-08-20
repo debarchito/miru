@@ -181,7 +181,7 @@ let display_error (span_opt, msg, detail) =
   Term.display d
 
 let run () =
-  let pp = Reader.Pp.pp_ast in
+  let pp = Reader.Form.pp in
   if not (Unix.isatty Unix.stdin) then begin
     let buf = Buffer.create 4096 in
     ( try

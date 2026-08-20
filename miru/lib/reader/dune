@@ -3,4 +3,5 @@
 (library
  (name reader)
  (public_name miru.reader)
+ (preprocess (pps ppx_deriving.show))
  (libraries asai))

@@ -9,6 +9,7 @@ module Message = struct
     | UndefinedDispatch
     | OddStructBody
     | InvalidFieldKey
+    | InvalidForm
     | InvalidMutableFieldKey
     | TagHandlerError
 
@@ -33,10 +34,12 @@ module Message = struct
         "E008"
     | InvalidFieldKey ->
         "E009"
-    | InvalidMutableFieldKey ->
+    | InvalidForm ->
         "E010"
-    | TagHandlerError ->
+    | InvalidMutableFieldKey ->
         "E011"
+    | TagHandlerError ->
+        "E012"
 end
 
 include Asai.Reporter.Make (Message)

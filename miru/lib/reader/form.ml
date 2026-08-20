@@ -6,19 +6,25 @@ type t =
   | Float of float
   | String of string
   | Symbol of string
-  | List of t list
-  | RecordExpression of (t * t) list
+  | Call of t list
+  | RawRecord of t list
+  | RecordValue of (t * t) list
+  | RecordMatch of (t * t) list
   | Record of string * t
   | Constructor of string * t option
   | Variant of string * t list
   | AbstractType of string * t
   | Tag of string * t
-  | Fn of t list
+  | Fn of t * t
   | Quote of t
   | Quasiquote of t
   | Unquote of t
   | Splice of t
   | Field of t
-  | MutableField of string
+  | Specifier of string * t
   | Type of t
   | TypeApplication of string * t
+  | Let of {name: t; body: t}
+  | Block of t list
+  | Sequence of t list
+[@@deriving show]
