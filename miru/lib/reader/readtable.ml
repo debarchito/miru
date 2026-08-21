@@ -1,29 +1,29 @@
 type tag_handler = t -> Form.t -> Form.t
 
 and t =
-  { macro: (char, t -> Stream.t -> char -> Form.t) Hashtbl.t
-  ; untagged: (char, t -> Stream.t -> char -> Form.t) Hashtbl.t
+  { macro: (t -> Stream.t -> char -> Form.t) option array
+  ; untagged: (t -> Stream.t -> char -> Form.t) option array
   ; tags: (string, tag_handler) Hashtbl.t }
 
 exception Duplicate_tag of string
 
-exception Reserved_tag of string
-
 let create () =
-  {macro= Hashtbl.create 16; untagged= Hashtbl.create 4; tags= Hashtbl.create 16}
+  { macro= Array.make 256 None
+  ; untagged= Array.make 256 None
+  ; tags= Hashtbl.create 16 }
 
 let copy rt =
-  { macro= Hashtbl.copy rt.macro
-  ; untagged= Hashtbl.copy rt.untagged
+  { macro= Array.copy rt.macro
+  ; untagged= Array.copy rt.untagged
   ; tags= Hashtbl.copy rt.tags }
 
-let set_macro rt c fn = Hashtbl.replace rt.macro c fn
+let set_macro rt c fn = rt.macro.(Char.code c) <- Some fn
 
-let find_macro rt c = Hashtbl.find_opt rt.macro c
+let find_macro rt c = rt.macro.(Char.code c)
 
-let set_untagged_dispatch rt c fn = Hashtbl.replace rt.untagged c fn
+let set_untagged_dispatch rt c fn = rt.untagged.(Char.code c) <- Some fn
 
-let find_untagged_dispatch rt c = Hashtbl.find_opt rt.untagged c
+let find_untagged_dispatch rt c = rt.untagged.(Char.code c)
 
 let register_tag rt tag fn =
   if Hashtbl.mem rt.tags tag then raise (Duplicate_tag tag)

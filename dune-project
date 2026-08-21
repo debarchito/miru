@@ -20,14 +20,18 @@
  (depends
   (ocaml
    (>= "5.5.0"))
+  (zarith
+   (= "1.14"))
+  (floatml
+   (= "0.2.1"))
   (ppx_deriving
-   (>= "6.1.3"))
+   (= "6.1.3"))
   (asai
-   (>= "0.3.1"))
+   (= "0.3.1"))
   (alcotest
-   (>= "1.9.1"))
+   (= "1.9.1"))
   (dune-cargo-build
-   (>= "0.2.2")))
+   (= "0.2.2")))
  (tags ("miru")))
 
 (package

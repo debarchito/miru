@@ -52,6 +52,9 @@ let is_delimiter c =
 
 let skip_whitespace s = Stream.skip_while s is_whitespace
 
+let raise_error span msg detail =
+  raise (Err.Reader_error (span, msg, detail))
+
 let hex_val = function
   | '0' .. '9' as c ->
       Char.code c - Char.code '0'
@@ -69,11 +72,8 @@ let read_escape s =
     | c when is_hex_digit c ->
         hex_val c
     | _ ->
-        raise
-          (Err.Reader_error
-             ( Stream.captured_point_range s cap
-             , Err.Message.InvalidHexEscape
-             , "invalid hex escape" ) )
+        raise_error (Stream.captured_point_range s cap) Err.Message.InvalidHexEscape
+          "invalid hex escape"
   in
   match Stream.read s with
   | 'n' ->
@@ -95,11 +95,8 @@ let read_escape s =
   | c ->
       c
   | exception Stream.End_of_input ->
-      raise
-        (Err.Reader_error
-           ( Stream.current_point_range s
-           , Err.Message.UnterminatedStringEscape
-           , "unterminated string escape" ) )
+      raise_error (Stream.current_point_range s) Err.Message.UnterminatedStringEscape
+        "unterminated string escape"
 
 let read_string_body s =
   let buf = Buffer.create 64 in
@@ -113,13 +110,79 @@ let read_string_body s =
     | c ->
         Buffer.add_char buf c ; loop ()
     | exception Stream.End_of_input ->
-        raise
-          (Err.Reader_error
-             ( Stream.current_point_range s
-             , Err.Message.UnterminatedString
-             , "unterminated string" ) )
+        raise_error (Stream.current_point_range s) Err.Message.UnterminatedString
+          "unterminated string"
   in
   loop ()
+
+let read_digits pred buf s =
+  let rec go () =
+    match Stream.peek s with
+    | Some c when pred c ->
+        Buffer.add_char buf (Stream.read s) ;
+        go ()
+    | _ ->
+        ()
+  in
+  go ()
+
+let read_int_suffix s =
+  match Stream.peek s with
+  | Some ('i' | 'u') as c ->
+      let signed = c = Some 'i' in
+      let _ = Stream.read s in
+      let buf = Buffer.create 8 in
+      read_digits is_digit buf s ;
+      let contents = Buffer.contents buf in
+      if String.length contents = 0 then
+        raise_error (Stream.current_point_range s) Err.Message.InvalidFieldKey
+          "expected digits after integer suffix" ;
+      let bits = int_of_string contents in
+      Some {Form.signed; bits}
+  | _ ->
+      None
+
+let read_float_suffix s =
+  match Stream.peek s with
+  | Some 'f' ->
+      let _ = Stream.read s in
+      let buf = Buffer.create 3 in
+      read_digits is_digit buf s ;
+      let contents = Buffer.contents buf in
+      if String.length contents = 0 then None
+      else Some contents
+  | _ ->
+      None
+
+let float_precision_of_string = function
+  | "16" ->
+      Some `F16
+  | "32" ->
+      Some `F32
+  | "64" ->
+      Some `F64
+  | "128" ->
+      Some `F128
+  | _ ->
+      None
+
+let make_float prec s =
+  match prec with
+  | `F16 ->
+      Form.Float (Floatml.AnyFloat.f16 (Floatml.F16.of_string s), 16)
+  | `F32 ->
+      Form.Float (Floatml.AnyFloat.f32 (Floatml.F32.of_string s), 32)
+  | `F64 ->
+      Form.Float (Floatml.AnyFloat.f64 (Floatml.F64.of_string s), 64)
+  | `F128 ->
+      Form.Float (Floatml.AnyFloat.f128 (Floatml.F128.of_string s), 128)
+
+let make_int buf suffix =
+  let z = Z.of_string (Buffer.contents buf) in
+  Form.Int (z, suffix)
+
+let read_int_with_suffix buf s =
+  make_int buf (Option.value ~default:Form.default_int_suffix (read_int_suffix s))
 
 let read_number s first =
   let buf = Buffer.create 16 in
@@ -128,79 +191,56 @@ let read_number s first =
     if first = '0' then
       match Stream.peek s with
       | Some ('x' | 'X') ->
-          ignore (Stream.read s) ;
-          Some `Hex
+          Buffer.add_char buf (Stream.read s) ;
+          `Hex
       | Some ('o' | 'O') ->
           ignore (Stream.read s) ;
-          Some `Oct
+          `Oct
       | Some ('b' | 'B') ->
           ignore (Stream.read s) ;
-          Some `Bin
+          `Bin
       | _ ->
-          None
-    else None
+          `None
+    else `None
   in
   match prefix with
-  | Some `Hex ->
-      let rec go () =
-        match Stream.peek s with
-        | Some c when is_hex_digit c ->
-            Buffer.add_char buf (Stream.read s) ;
-            go ()
-        | _ ->
-            Form.Int (Int64.of_string ("0x" ^ Buffer.contents buf))
-      in
-      go ()
-  | Some `Oct ->
-      let rec go () =
-        match Stream.peek s with
-        | Some c when is_oct_digit c ->
-            Buffer.add_char buf (Stream.read s) ;
-            go ()
-        | _ ->
-            Form.Int (Int64.of_string ("0o" ^ Buffer.contents buf))
-      in
-      go ()
-  | Some `Bin ->
-      let rec go () =
-        match Stream.peek s with
-        | Some c when is_bin_digit c ->
-            Buffer.add_char buf (Stream.read s) ;
-            go ()
-        | _ ->
-            Form.Int (Int64.of_string ("0b" ^ Buffer.contents buf))
-      in
-      go ()
-  | None ->
-      let rec read_int_part () =
-        match Stream.peek s with
-        | Some c when is_digit c ->
-            Buffer.add_char buf (Stream.read s) ;
-            read_int_part ()
-        | _ ->
-            ()
-      in
-      read_int_part () ;
+  | `Hex ->
+      read_digits is_hex_digit buf s ;
+      read_int_with_suffix buf s
+  | `Oct ->
+      Buffer.add_string buf "o" ;
+      read_digits is_oct_digit buf s ;
+      read_int_with_suffix buf s
+  | `Bin ->
+      Buffer.add_string buf "b" ;
+      read_digits is_bin_digit buf s ;
+      read_int_with_suffix buf s
+  | `None ->
+      read_digits is_digit buf s ;
       let has_dot =
         match Stream.peek s with
         | Some '.' -> (
-          match Stream.peek_next s with Some c -> is_digit c | None -> false )
+          match Stream.peek_next s with
+          | Some c ->
+              is_digit c || is_delimiter c || is_symbol_start c
+          | None ->
+              true )
         | _ ->
             false
       in
-      if not has_dot then Form.Int (Int64.of_string (Buffer.contents buf))
+      if not has_dot then begin
+        ( match Stream.peek s with
+        | Some 'f' ->
+            raise_error (Stream.current_point_range s) Err.Message.InvalidFieldKey
+              "float suffix on integer (missing '.' for float)"
+        | _ ->
+            () ) ;
+        read_int_with_suffix buf s
+      end
       else begin
         ignore (Stream.read s) ;
         Buffer.add_char buf '.' ;
-        let rec read_frac () =
-          match Stream.peek s with
-          | Some c when is_digit c ->
-              Buffer.add_char buf (Stream.read s) ;
-              read_frac ()
-          | _ ->
-              ()
-        in
-        read_frac () ;
+        read_digits is_digit buf s ;
         let has_exp =
           match Stream.peek s with Some ('e' | 'E') -> true | _ -> false
         in
@@ -212,17 +252,24 @@ let read_number s first =
               Buffer.add_char buf (Stream.read s)
           | _ ->
               () ) ;
-          let rec read_exp () =
-            match Stream.peek s with
-            | Some c when is_digit c ->
-                Buffer.add_char buf (Stream.read s) ;
-                read_exp ()
-            | _ ->
-                ()
-          in
-          read_exp ()
+          read_digits is_digit buf s
         end ;
-        Form.Float (float_of_string (Buffer.contents buf))
+        match Stream.peek s with
+        | Some 'i' | Some 'u' ->
+            raise_error (Stream.current_point_range s) Err.Message.InvalidFieldKey
+              "integer suffix on float (remove suffix or use 'f' suffix)"
+        | _ -> (
+          match read_float_suffix s with
+          | Some prec -> (
+            match float_precision_of_string prec with
+            | Some p ->
+                make_float p (Buffer.contents buf)
+            | None ->
+                raise_error (Stream.current_point_range s)
+                  Err.Message.InvalidFieldKey
+                  (Printf.sprintf "invalid float precision: f%s" prec) )
+          | None ->
+              make_float `F64 (Buffer.contents buf) )
       end
 
 let read_symbol_name s first =
@@ -255,11 +302,7 @@ let read_token s first =
   in
   if is_digit first then read_number s first
   else if (first = '-' || first = '+') && peek_digit then read_number s first
-  else if first = '.' && peek_digit then read_number s first
   else if is_symbol_start first then read_symbol s first
   else
-    raise
-      (Err.Reader_error
-         ( Stream.current_point_range s
-         , Err.Message.UnexpectedCharacter
-         , Printf.sprintf "unexpected character '%c'" first ) )
+    raise_error (Stream.current_point_range s) Err.Message.UnexpectedCharacter
+      (Printf.sprintf "unexpected character '%c'" first)
