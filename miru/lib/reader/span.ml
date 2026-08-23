@@ -17,6 +17,8 @@ let make_range start_pos end_pos = Asai.Range.make (start_pos, end_pos)
 
 let make_point_range pos = Asai.Range.make (pos, pos)
 
+let make_eof_range pos = Asai.Range.eof pos
+
 let source_of_range r = Asai.Range.source r
 
 let begin_line_num r = Asai.Range.begin_line_num r

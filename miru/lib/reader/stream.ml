@@ -14,7 +14,8 @@ type capture = {cp_pos: int; cp_line: int; cp_col: int; cp_sol: int}
 let from_string ?source s =
   {input= s; len= String.length s; pos= 0; line= 1; col= 0; sol= 0; source}
 
-let peek s = if s.pos >= s.len then None else Some (String.unsafe_get s.input s.pos)
+let peek s =
+  if s.pos >= s.len then None else Some (String.unsafe_get s.input s.pos)
 
 let peek_next s =
   let p = s.pos + 1 in
@@ -36,10 +37,16 @@ let pos s = (s.pos, s.line, s.col)
 
 let capture s = {cp_pos= s.pos; cp_line= s.line; cp_col= s.col; cp_sol= s.sol}
 
-let point_range s ~offset ~line_num ~start_of_line =
+let make_position s ~offset ~line_num ~start_of_line =
   match s.source with
   | Some src ->
-      let p = Span.make_position ~src ~offset ~line_num ~start_of_line in
+      Some (Span.make_position ~src ~offset ~line_num ~start_of_line)
+  | None ->
+      None
+
+let point_range s ~offset ~line_num ~start_of_line =
+  match make_position s ~offset ~line_num ~start_of_line with
+  | Some p ->
       Some (Span.make_point_range p)
   | None ->
       None
@@ -47,8 +54,52 @@ let point_range s ~offset ~line_num ~start_of_line =
 let current_point_range s =
   point_range s ~offset:s.pos ~line_num:s.line ~start_of_line:s.sol
 
+let current_eof_range s =
+  match s.source with
+  | None ->
+      None
+  | Some src ->
+      let p =
+        Span.make_position ~src ~offset:s.pos ~line_num:s.line
+          ~start_of_line:s.sol
+      in
+      Some (Span.make_eof_range p)
+
 let captured_point_range s cap =
-  point_range s ~offset:cap.cp_pos ~line_num:s.line ~start_of_line:cap.cp_sol
+  point_range s ~offset:cap.cp_pos ~line_num:cap.cp_line
+    ~start_of_line:cap.cp_sol
+
+let last_char_range s =
+  match s.source with
+  | None ->
+      None
+  | Some src ->
+      if s.pos = 0 then None
+      else
+        let offset = s.pos - 1 in
+        let p_start =
+          Span.make_position ~src ~offset ~line_num:s.line ~start_of_line:s.sol
+        in
+        let p_end =
+          Span.make_position ~src ~offset:s.pos ~line_num:s.line
+            ~start_of_line:s.sol
+        in
+        Some (Span.make_range p_start p_end)
+
+let range_from_capture s cap =
+  match s.source with
+  | None ->
+      None
+  | Some src ->
+      let start_pos =
+        Span.make_position ~src ~offset:cap.cp_pos ~line_num:cap.cp_line
+          ~start_of_line:cap.cp_sol
+      in
+      let end_pos =
+        Span.make_position ~src ~offset:s.pos ~line_num:s.line
+          ~start_of_line:s.sol
+      in
+      Some (Span.make_range start_pos end_pos)
 
 let skip_while s f =
   let input = s.input and len = s.len in

@@ -175,11 +175,6 @@ let indent_of s =
   String.iter (function '(' -> incr depth | ')' -> decr depth | _ -> ()) s ;
   if !depth <= 0 then 0 else 6 + ((!depth - 1) * 2)
 
-let display_error (span_opt, msg, detail) =
-  let module Term = Asai.Tty.Make (Reader.Err.Message) in
-  let d = Asai.Diagnostic.make ?loc:span_opt Asai.Diagnostic.Error msg detail in
-  Term.display d
-
 let run () =
   let pp = Reader.Form.pp in
   if not (Unix.isatty Unix.stdin) then begin
@@ -219,13 +214,10 @@ let run () =
           let full = if is_cont then acc ^ "\n" ^ line else line in
           if is_balanced full then begin
             add_history history full ;
-            ( try
-                let forms = Reader.Driver.read_all full in
-                List.iter (fun f -> Format.printf "%a\n%!" pp f) forms
-              with Reader.Err.Reader_error (span_opt, msg, detail) ->
-                display_error (span_opt, msg, detail) ;
-                write "\n" ) ;
-            write "\n" ; loop ""
+            let forms = Reader.Driver.read_all_interactive ~title:"repl" full in
+            List.iter (fun f -> Format.printf "%a\n%!" pp f) forms ;
+            write "\n" ;
+            loop ""
           end
           else loop full
         in

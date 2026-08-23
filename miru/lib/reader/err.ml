@@ -44,8 +44,19 @@ end
 
 include Asai.Reporter.Make (Message)
 
-exception Reader_error of Span.t option * Message.t * string
+let remark_loctext kind ?loc fmt =
+  Format.kdprintf
+    (fun body ->
+      let text ppf = Format.fprintf ppf "%s\x00%t" kind body in
+      Asai.Range.locate_opt loc text )
+    fmt
 
-let display_diagnostic d =
-  let module Term = Asai.Tty.Make (Message) in
-  Term.display d
+let note fmt = remark_loctext "note" fmt
+
+let note_at loc fmt = remark_loctext "note" ~loc fmt
+
+let hint fmt = remark_loctext "hint" fmt
+
+let hint_at loc fmt = remark_loctext "hint" ~loc fmt
+
+let display_diagnostic d = Renderer.display (module Message) d

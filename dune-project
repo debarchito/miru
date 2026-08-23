@@ -28,6 +28,8 @@
    (= "6.1.3"))
   (asai
    (= "0.3.1"))
+  (bwd
+   (= "2.3.0"))
   (alcotest
    (= "1.9.1"))
   (dune-cargo-build

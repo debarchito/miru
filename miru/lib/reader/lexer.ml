@@ -52,9 +52,6 @@ let is_delimiter c =
 
 let skip_whitespace s = Stream.skip_while s is_whitespace
 
-let raise_error span msg detail =
-  raise (Err.Reader_error (span, msg, detail))
-
 let hex_val = function
   | '0' .. '9' as c ->
       Char.code c - Char.code '0'
@@ -72,8 +69,9 @@ let read_escape s =
     | c when is_hex_digit c ->
         hex_val c
     | _ ->
-        raise_error (Stream.captured_point_range s cap) Err.Message.InvalidHexEscape
-          "invalid hex escape"
+        Err.fatal ?loc:(Stream.range_from_capture s cap)
+          Err.Message.InvalidHexEscape
+          "expected a hex digit (0-9, a-f, A-F)"
   in
   match Stream.read s with
   | 'n' ->
@@ -95,8 +93,9 @@ let read_escape s =
   | c ->
       c
   | exception Stream.End_of_input ->
-      raise_error (Stream.current_point_range s) Err.Message.UnterminatedStringEscape
-        "unterminated string escape"
+      Err.fatal ?loc:(Stream.current_eof_range s)
+        Err.Message.UnterminatedStringEscape
+        "unterminated string escape sequence"
 
 let read_string_body s =
   let buf = Buffer.create 64 in
@@ -110,8 +109,10 @@ let read_string_body s =
     | c ->
         Buffer.add_char buf c ; loop ()
     | exception Stream.End_of_input ->
-        raise_error (Stream.current_point_range s) Err.Message.UnterminatedString
-          "unterminated string"
+        Err.fatal ?loc:(Stream.current_eof_range s)
+          ~extra_remarks:[Err.hint "add a closing '\"' to terminate the string"]
+          Err.Message.UnterminatedString
+          "unterminated string literal"
   in
   loop ()
 
@@ -135,8 +136,10 @@ let read_int_suffix s =
       read_digits is_digit buf s ;
       let contents = Buffer.contents buf in
       if String.length contents = 0 then
-        raise_error (Stream.current_point_range s) Err.Message.InvalidFieldKey
-          "expected digits after integer suffix" ;
+        Err.fatal ?loc:(Stream.last_char_range s)
+          ~extra_remarks:[Err.hint "specify the bit width after the suffix (e.g. i64, u32, i8, u128)"]
+          Err.Message.InvalidFieldKey
+          "missing bit-width after integer suffix" ;
       let bits = int_of_string contents in
       Some {Form.signed; bits}
   | _ ->
@@ -231,8 +234,12 @@ let read_number s first =
       if not has_dot then begin
         ( match Stream.peek s with
         | Some 'f' ->
-            raise_error (Stream.current_point_range s) Err.Message.InvalidFieldKey
-              "float suffix on integer (missing '.' for float)"
+            let cap = Stream.capture s in
+            ignore (Stream.read s) ;
+            Err.fatal ?loc:(Stream.range_from_capture s cap)
+              ~extra_remarks:[Err.hint "add a decimal point to make it a float literal (e.g. 1.0f32)"]
+              Err.Message.InvalidFieldKey
+              "float suffix on an integer literal"
         | _ ->
             () ) ;
         read_int_with_suffix buf s
@@ -256,8 +263,12 @@ let read_number s first =
         end ;
         match Stream.peek s with
         | Some 'i' | Some 'u' ->
-            raise_error (Stream.current_point_range s) Err.Message.InvalidFieldKey
-              "integer suffix on float (remove suffix or use 'f' suffix)"
+            let cap = Stream.capture s in
+            ignore (Stream.read s) ;
+            Err.fatal ?loc:(Stream.range_from_capture s cap)
+              ~extra_remarks:[Err.hint "remove the suffix, or use a float precision suffix instead (e.g. 1.0f32)"]
+              Err.Message.InvalidFieldKey
+              "integer suffix on a float literal"
         | _ -> (
           match read_float_suffix s with
           | Some prec -> (
@@ -265,9 +276,10 @@ let read_number s first =
             | Some p ->
                 make_float p (Buffer.contents buf)
             | None ->
-                raise_error (Stream.current_point_range s)
+                Err.fatal ?loc:(Stream.last_char_range s)
+                  ~extra_remarks:[Err.hint "valid float precision suffixes are f16, f32, f64, and f128"]
                   Err.Message.InvalidFieldKey
-                  (Printf.sprintf "invalid float precision: f%s" prec) )
+                  (Printf.sprintf "unknown float precision 'f%s'" prec) )
           | None ->
               make_float `F64 (Buffer.contents buf) )
       end
@@ -297,6 +309,7 @@ let read_symbol s first =
       Form.Symbol name
 
 let read_token s first =
+  let cap = Stream.capture s in
   let peek_digit =
     match Stream.peek s with Some c -> is_digit c | None -> false
   in
@@ -304,5 +317,6 @@ let read_token s first =
   else if (first = '-' || first = '+') && peek_digit then read_number s first
   else if is_symbol_start first then read_symbol s first
   else
-    raise_error (Stream.current_point_range s) Err.Message.UnexpectedCharacter
-      (Printf.sprintf "unexpected character '%c'" first)
+    Err.fatal ?loc:(Stream.range_from_capture s cap)
+      Err.Message.UnexpectedCharacter
+      (Printf.sprintf "unexpected character '%c' (U+%04X)" first (Char.code first))

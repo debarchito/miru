@@ -20,12 +20,13 @@ and read_forms_until rt s close =
   Lexer.skip_whitespace s ;
   match Stream.peek s with
   | None ->
-      raise
-        (Err.Reader_error
-           ( Stream.current_point_range s
-           , Err.Message.UnexpectedEOF
-           , Printf.sprintf "unexpected EOF while reading form (expecting '%c')"
-               close ) )
+      Err.fatal
+        ?loc:(Stream.current_eof_range s)
+        Err.Message.UnexpectedEOF
+        ~extra_remarks:
+          [Err.hint "add a closing '%c' to match the opening delimiter" close]
+        (Printf.sprintf "unexpected end of input while reading a '%c' form"
+           close )
   | Some c when c = close ->
       ignore (Stream.read s) ;
       []
@@ -59,22 +60,26 @@ and record_value_of_forms forms =
   let rec pair acc = function
     | [] ->
         Form.Record_value (List.rev acc)
-    | [f] ->
-        raise
-          (Err.Reader_error
-             ( None
-             , Err.Message.OddStructBody
-             , "struct body has odd number of forms" ) )
+    | [_] ->
+        Err.fatal Err.Message.OddStructBody
+          ~extra_remarks:
+            [ Err.hint
+                "struct literals are key-value pairs — each key needs a \
+                 matching value" ]
+          "struct body has an odd number of forms"
     | Form.Call (Form.Symbol "=" :: _) :: _ ->
-        raise
-          (Err.Reader_error
-             ( None
-             , Err.Message.InvalidFieldKey
-             , "(= x y) is only valid in record match, not record value" ) )
+        Err.fatal Err.Message.InvalidFieldKey
+          ~extra_remarks:
+            [ Err.hint
+                "use '(= src dst)' only inside a record match pattern, not \
+                 when constructing a record value" ]
+          "'(= ...)' is not valid as a record field key"
     | Form.Symbol k :: v :: rest ->
         pair ((Form.Field (Form.Symbol k), v) :: acc) rest
     | Form.Int (k, _) :: v :: rest ->
-        pair ((Form.Field (Form.Int (k, Form.default_int_suffix)), v) :: acc) rest
+        pair
+          ((Form.Field (Form.Int (k, Form.default_int_suffix)), v) :: acc)
+          rest
     | k :: v :: rest ->
         pair ((k, v) :: acc) rest
   in
@@ -90,18 +95,16 @@ and record_match_of_forms forms =
     | [Form.Call [Form.Symbol "="; Form.Symbol src; Form.Symbol dst]] ->
         Form.Record_match
           (List.rev ((Form.Field (Form.Symbol src), Form.Symbol dst) :: acc))
-    | [f] ->
-        raise
-          (Err.Reader_error
-             ( None
-             , Err.Message.OddStructBody
-             , "match body has odd number of forms" ) )
+    | [_] ->
+        Err.fatal Err.Message.OddStructBody
+          ~extra_remarks:
+            [ Err.hint
+                "each field in a record match needs either a bare name or a \
+                 '(= src dst)' rename" ]
+          "record match has an odd number of forms"
     | Form.Symbol name :: rest ->
-        pair
-          ((Form.Field (Form.Symbol name), Form.Symbol name) :: acc)
-          rest
-    | (Form.Call [Form.Symbol "="; Form.Symbol src; Form.Symbol dst])
-      :: rest ->
+        pair ((Form.Field (Form.Symbol name), Form.Symbol name) :: acc) rest
+    | Form.Call [Form.Symbol "="; Form.Symbol src; Form.Symbol dst] :: rest ->
         pair ((Form.Field (Form.Symbol src), Form.Symbol dst) :: acc) rest
     | k :: v :: rest ->
         pair ((k, v) :: acc) rest
@@ -162,14 +165,9 @@ and read_let_form = function
       let pat = record_match_of_forms forms in
       Form.Let (pat, resolve_raw_record value)
   | [Form.Symbol "let"; Form.Record_match _; _] as l -> (
-    match l with
-    | [_; pat; value] ->
-        Form.Let (pat, value)
-    | _ ->
-        Form.Call l )
+    match l with [_; pat; value] -> Form.Let (pat, value) | _ -> Form.Call l )
   | [Form.Symbol "let"; Form.Record_value pat_fields; value] ->
-      Form.Let
-        (Form.Record_match pat_fields, resolve_raw_record value)
+      Form.Let (Form.Record_match pat_fields, resolve_raw_record value)
   | Form.Symbol "let" :: Form.Record_value pat_fields :: value :: body ->
       Form.Let
         ( Form.Record_match pat_fields
@@ -182,11 +180,10 @@ and read_let_form = function
           | [] ->
               []
           | _ ->
-              raise
-                (Err.Reader_error
-                   ( None
-                   , Err.Message.InvalidForm
-                   , "multi-binding: odd number of forms" ))
+              Err.fatal Err.Message.InvalidForm
+                ~extra_remarks:
+                  [Err.hint "each binding name must be followed by its value"]
+                "multi-binding let has an odd number of forms"
         in
         go fields
       in
@@ -202,33 +199,31 @@ and read_let_form = function
           | [] ->
               []
           | _ ->
-              raise
-                (Err.Reader_error
-                   ( None
-                   , Err.Message.InvalidForm
-                   , "multi-binding: odd number of forms" ))
+              Err.fatal Err.Message.InvalidForm
+                ~extra_remarks:
+                  [Err.hint "each binding name must be followed by its value"]
+                "multi-binding let has an odd number of forms"
         in
         go forms
       in
       Form.Intermediate_block_inline bindings
   | forms ->
-      raise
-        (Err.Reader_error
-           ( None
-           , Err.Message.InvalidForm
-           , Printf.sprintf "invalid 'let' form: %d arguments"
-               (List.length forms) ) )
+      Err.fatal Err.Message.InvalidForm
+        ~extra_remarks:
+          [ Err.hint
+              "valid forms: (let name value), (let name {args} body...), or \
+               (let {n1 v1 n2 v2 ...})" ]
+        (Printf.sprintf "invalid 'let' form: got %d argument(s)"
+           (List.length forms - 1) )
 
 and read_fn_form = function
   | Form.Symbol "fn" :: args_form :: body ->
       let args = extract_record_args args_form in
       curry_fn args (build_fn_body (List.map resolve_raw_record body))
   | _ ->
-      raise
-        (Err.Reader_error
-           ( None
-           , Err.Message.InvalidForm
-           , "invalid fn form" ))
+      Err.fatal Err.Message.InvalidForm
+        ~extra_remarks:[Err.hint "expected: (fn {arg1 arg2 ...} body...)"]
+        "invalid 'fn' form"
 
 and read_type_form = function
   | [] ->
@@ -248,18 +243,22 @@ and read_type_form = function
 and read_tuple_macro rt s _ =
   let items = read_forms_until rt s ']' in
   Form.Record_value
-    (List.mapi (fun i v -> (Form.Field (Form.Int (Z.of_int i, Form.default_int_suffix)), v)) items)
+    (List.mapi
+       (fun i v ->
+         (Form.Field (Form.Int (Z.of_int i, Form.default_int_suffix)), v) )
+       items )
 
 and read_struct_macro rt s _ =
   let rec read_forms acc =
     Lexer.skip_whitespace s ;
     match Stream.peek s with
     | None ->
-        raise
-          (Err.Reader_error
-             ( Stream.current_point_range s
-             , Err.Message.UnexpectedEOF
-             , "unexpected EOF while reading struct body (expecting '}')" ) )
+        Err.fatal
+          ?loc:(Stream.current_eof_range s)
+          Err.Message.UnexpectedEOF
+          ~extra_remarks:
+            [Err.hint "add a closing '}' to terminate the struct literal"]
+          "unexpected end of input inside a struct literal"
     | Some '}' ->
         ignore (Stream.read s) ;
         List.rev acc
@@ -274,11 +273,8 @@ and read_struct_macro rt s _ =
   Form.Intermediate_record_raw forms
 
 and read_close_error s c =
-  raise
-    (Err.Reader_error
-       ( Stream.current_point_range s
-       , Err.Message.UnexpectedClose
-       , Printf.sprintf "unexpected '%c'" c ) )
+  Err.fatal ?loc:(Stream.last_char_range s) Err.Message.UnexpectedClose
+    (Printf.sprintf "unexpected closing '%c' with no matching opener" c)
 
 and read_fn_dispatch rt s _ =
   let forms = read_forms_until rt s ')' in
@@ -298,11 +294,14 @@ and read_set_dispatch rt s _ =
 and read_dispatch_macro rt s _ =
   match Stream.peek s with
   | None ->
-      raise
-        (Err.Reader_error
-           ( Stream.current_point_range s
-           , Err.Message.UnexpectedEOF
-           , "unexpected EOF after '#'" ) )
+      Err.fatal
+        ?loc:(Stream.current_eof_range s)
+        Err.Message.UnexpectedEOF
+        ~extra_remarks:
+          [ Err.hint
+              "'#' must be followed by '(', '[', '{', or a tag name such as #_"
+          ]
+        "unexpected end of input after '#'"
   | Some c -> (
     match Readtable.find_untagged_dispatch rt c with
     | Some fn ->
@@ -311,11 +310,14 @@ and read_dispatch_macro rt s _ =
     | None ->
         if Lexer.is_symbol_start c then read_tag_dispatch rt s
         else
-          raise
-            (Err.Reader_error
-               ( Stream.current_point_range s
-               , Err.Message.UndefinedDispatch
-               , Printf.sprintf "undefined # dispatch '%c'" c ) ) )
+          Err.fatal
+            ?loc:(Stream.current_point_range s)
+            Err.Message.UndefinedDispatch
+            ~extra_remarks:
+              [ Err.hint
+                  "valid characters after '#' are '(', '[', '{', or a tag name \
+                   such as #_" ]
+            (Printf.sprintf "undefined dispatch '#%c'" c) )
 
 and read_tag_dispatch rt s =
   let cap = Stream.capture s in
@@ -323,25 +325,22 @@ and read_tag_dispatch rt s =
   let tag = Lexer.read_symbol_name s first in
   match Readtable.find_tag rt tag with
   | None ->
-      raise
-        (Err.Reader_error
-           ( Stream.captured_point_range s cap
-           , Err.Message.UndefinedDispatch
-           , Printf.sprintf "undefined tag dispatch '#%s'" tag ) )
+      Err.fatal
+        ?loc:(Stream.range_from_capture s cap)
+        Err.Message.UndefinedDispatch
+        (Printf.sprintf "unknown reader tag '#%s'" tag)
   | Some handler -> (
       let payload = read_form rt s in
-      try handler rt payload with
-      | Err.Reader_error _ as e ->
-          raise e
-      | exn ->
-          raise
-            (Err.Reader_error
-               ( Stream.captured_point_range s cap
-               , Err.Message.TagHandlerError
-               , Printf.sprintf "tag '#%s' handler raised: %s" tag
-                   (Printexc.to_string exn) ) ) )
+      try handler rt payload
+      with exn ->
+        Err.fatal
+          ?loc:(Stream.range_from_capture s cap)
+          Err.Message.TagHandlerError
+          (Printf.sprintf "reader tag '#%s' raised an unexpected error: %s" tag
+             (Printexc.to_string exn) ) )
 
-let discard_tag : Readtable.tag_handler = fun _rt _form -> Form.Intermediate_empty
+let discard_tag : Readtable.tag_handler =
+ fun _rt _form -> Form.Intermediate_empty
 
 let default_readtable () =
   let rt = Readtable.create () in
@@ -361,30 +360,32 @@ let default_readtable () =
   Readtable.register_tag rt "_" discard_tag ;
   rt
 
-let read_all ?(rt = default_readtable ()) input =
-  let s = Stream.from_string input in
+let read_forms_in_stream rt s =
   let forms = ref [] in
   ( try
       while true do
-        match read_form rt s with Form.Intermediate_empty -> () | f -> forms := f :: !forms
+        match read_form rt s with
+        | Form.Intermediate_empty ->
+            ()
+        | f ->
+            forms := f :: !forms
       done
     with Stream.End_of_input -> () ) ;
   List.rev !forms
 
-let read_all_reported ?(rt = default_readtable ()) ~title input =
-  let source = Span.source_of_string ~source_title:title input in
+let read_all ?(rt = default_readtable ()) ?title input =
+  let source = Span.source_of_string ?source_title:title input in
   let s = Stream.from_string ~source input in
-  let module Term = Asai.Tty.Make (Err.Message) in
-  Err.run ~emit:Term.display ~fatal:(fun d -> Term.display d ; exit 1)
-  @@ fun () ->
-  let forms = ref [] in
-  ( try
-      while true do
-        match read_form rt s with Form.Intermediate_empty -> () | f -> forms := f :: !forms
-      done
-    with
-  | Stream.End_of_input ->
-      ()
-  | Err.Reader_error (span_opt, msg, detail) ->
-      Err.fatal ?loc:span_opt ~severity:Asai.Diagnostic.Error msg detail ) ;
-  List.rev !forms
+  Err.run ~emit:Err.display_diagnostic
+    ~fatal:(fun d -> Err.display_diagnostic d ; exit 1)
+    (fun () -> read_forms_in_stream rt s)
+
+let read_all_interactive ?(rt = default_readtable ()) ?title input =
+  let source = Span.source_of_string ?source_title:title input in
+  let s = Stream.from_string ~source input in
+  Err.run ~emit:Err.display_diagnostic
+    ~fatal:(fun d -> Err.display_diagnostic d ; [])
+    (fun () -> read_forms_in_stream rt s)
+
+let read_all_reported ?(rt = default_readtable ()) ~title input =
+  read_all ~rt ~title input

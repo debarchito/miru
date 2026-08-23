@@ -3,5 +3,6 @@
 (library
  (name reader)
  (public_name miru.reader)
- (preprocess (pps ppx_deriving.show))
- (libraries asai zarith floatml))
+ (preprocess
+  (pps ppx_deriving.show))
+ (libraries asai bwd zarith floatml))
