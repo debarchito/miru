@@ -26,7 +26,9 @@ type-checking strategies.
 ;;; This is a documentation comment for the greet function that takes an
 ;;; argument name inferred as string.
 (let greet [name]
-  (println (String/concat "Hello, " name)))
+  ;; f-strings are special format strings! They are desugared into
+  ;; GADT-powered contexts, very similar to OCaml and Haskell!
+  (println (f"{}" (String/concat "Hello, " name))))
 
 ;; You can specify the type definition using a (val ...) expression.
 ;; The type signature are written in curried form. Type signatures use infix
@@ -36,14 +38,14 @@ type-checking strategies.
 ;; function must return something even if it's an unit.
 (val greet : string -> unit)
 (let greet [name]
-  ;; f-strings are special format strings! They are desugared into
-  ;; GADT-powered contexts, very similar to OCaml and Haskell!
   ;; "<>" is a semigroup append function. Since string concatenation forms a
   ;; free semigroup, it behaves the same as String/concat!
-  (println f"{}" (<> "Hello, " name))
-  ;; Modular implicits allow locally-resolved typeclass-like features.
+  (println (f"{}" (<> "Hello, " name)))
   ;; You can also insert the value inside the {...}!
+  (let msg (<> "Hello, " name))
+  (println f"{name}") ; println MUST take an f-string!
   (println f"I've been greeting a lot today, isn't it {name}?"))
+  ;; Modular implicits allow locally-resolved typeclass-like features.
 
 ;; Recursive functions need to be marked with a "rec" specifier.
 ;; Specifiers are special positional properties attached to labels.
@@ -56,7 +58,7 @@ type-checking strategies.
 ;; Some functions naturally don't take any arguments, so there's "unit" type for
 ;; it that has only one value written as "()".
 (let greet-morning [()]
-  (println "Good morning!"))
+  (println f"Good morning!"))
 
 ;; Unlike most Lisps, you must specify "()" when calling a function just for its
 ;; side-effect.
@@ -75,17 +77,17 @@ type-checking strategies.
 ;; :(...) are lists!
 (let new-list (map (* 2) :(1 2 3 4)) ; :(2 4 6 8)
 
-;; You can use (block ...) to group multiples expressions in a single block.
+;; You can use (begin ...) to group multiples expressions in a sequential scope.
 ;; let uses sequential binding, similar to let* in Scheme. They are similar to
 ;; let ... in ... expressions in OCaml.
-(block
+(begin
   (let [x 10
         y (+ x 10)])
   (+ x y)) ; 30
 
 ;; You can utilize (and ...) for parallel bindings.
-;; Seperating "block", "let" and "and" keeps composition cleaner.
-(block
+;; Seperating "begin", "let" and "and" keeps composition cleaner.
+(begin
   (let a 1)
   (and
     (let b (+ a 1)) ; b sees a, but not c.
@@ -108,7 +110,7 @@ type-checking strategies.
 ;; Additionaly, let can also be used for destructuring.
 ;; Almost all data structures can be destuctured!
 (let [x y z] [1 2.3 "hello!"])
-(println "{} {} {}" x y z) ; 1 2.3 hello!
+(println f"{x} {y} {z}") ; 1 2.3 hello!
 
 ;; Since functions are first-class you can always use lambdas.
 (let square (fn [x] (* x x)))
@@ -262,7 +264,7 @@ type-checking strategies.
 ;; We'll take any record as input that has an "id" field. < ... > are rows!
 (val print-id : < id : string | _ > -> unit
 (let print-id [record]
-  (println (.id record))) ; Nominal types can seamlessly fit here!
+  (println (f"{}" (.id record)))) ; Nominal types can seamlessly fit here!
 
 ;; Both of these work!
 (print-id s1) ; s1 is nominal.
@@ -298,18 +300,18 @@ type-checking strategies.
 
 ;; We can use ref cells to simulate mutable bindings.
 (let name (ref "Miru"))
-(println (ref.contents name)) ; Miru
+(println (f"{}" (ref.contents name))) ; Miru
 
 (<- ref.contents "MIRU" name)
 ;; This also works.
-(println (.contents name)) ; MIRU
+(println (f"{}" (.contents name))) ; MIRU
 
 ;; This is a very useful construct and the base will provide it by default.
 ;; Mutating and de-referencing is common enough that Miru has a built-in
 ;; functions for references, and a symbolic function for mutation. This is
 ;; similar to OCaml and Koka. !<id> is implemented as a special reader.
 (:= "Miru" name)
-(println !name) ; Miru
+(println (f"{}" !name)) ; Miru
 
 ;; The := function is implemented as follows:
 (val (:=) : 'a -> (ref 'a) -> unit)
@@ -348,17 +350,17 @@ type-checking strategies.
   ;; Just like (and ...), (or ...) are special context-resolvers.
   ;; Here, they together with "match" replace the need of a "|" operator.
   (or White Gray Black)
-    (println "Got constructors with no payload!")
+    (println f"Got constructors with no payload!")
 
   (RGB t)
     ;; The tuple t is refined in this scope, so we can use .<prop> syntax!
-    (println "Got: {} * {} * {}" (.0 t) (.1 t) (.2 t))
+    (println (f"Got: {} * {} * {}" (.0 t) (.1 t) (.2 t)))
 
   (HSL r)
     ;; Same goes for the record r!
     ;; The compiler is smart enough to optimize .<prop> into offsets instead of
     ;; using evidence passing!
-    (println "Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r)))
+    (println (f"Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r))))
     ;;             ^        <->        ^ double braces to escape!
   
 ;; We use the "alias" specifier to create type aliases.
@@ -489,7 +491,7 @@ type-checking strategies.
 
 ;; #(...) are anonymous functions.
 (let res (run-state 10 #(increment-by 5)))
-(println "{}" res) ; 15
+(println f"{res}") ; 15
 
 ;; Control operations capture the delimited continuation `k` at the perform site.
 ;; Like Koka, control operations default to one-shot resumptions: `k` can be
@@ -503,7 +505,7 @@ type-checking strategies.
 (val range : int -> int -> unit / < (gen int) .. >)
 (let range [start end]
   (if (<= start end)
-    (block
+    (begin
       (yield start)
       (range (+ start 1) end))
     ()))
@@ -511,7 +513,7 @@ type-checking strategies.
 (val run-print-gen : (unit -> unit / < (gen int) | 'e >) -> unit / < 'e >)
 (let run-print-gen [action]
   (with (yield item) ; Syntactic sugar for a single-operation effect handle!
-    (println "Yielded: {}" item)
+    (println f"Yielded: {item}")
     (resume ()))
  
   (action ()))
@@ -540,13 +542,13 @@ type-checking strategies.
 (val run-exn : (unit -> 'a / < (exn string) | 'e >) -> (option 'a) / < 'e >)
 (let run-exn [action]
   (with (throw err)
-    (println "Caught error: {}" err)
+    (println f"Caught error: {err}")
     None) ; We cannot use resume here.
   
   (Some (action ())))
 
 (let res1 (run-exn #(+ (parse-age -5) 100)))
-(println "{}" res1) ; None
+(println f"{res1}") ; None
 
 ;; Multi-shot effects are opt-in at the effect level using the `multi` modifier.
 ;; Because multi-shot operations clone stack frames and data contexts to preserve 
@@ -583,13 +585,13 @@ type-checking strategies.
   (action ()))
 
 (let res (handle-amb #(choices 5)))
-(println "{}" res) ; :(15 5)
+(println f"{res}") ; :(15 5)
 
 ;; Let's take a bit of time to understand the with-expression. Here are some
 ;; cases. First is the case for a scoped resource manager.
 (let count-steps [()]
   (scoped 0
-    #(block
+    #(begin
       (:= (+ !% 1) %)
       (:= (+ !% 2) %)
       !%)))
@@ -607,8 +609,8 @@ type-checking strategies.
 (with
   (handle
     (emit msg)
-      (block
-        (println "{}" msg)
+      (begin
+        (println f"{msg}")
         (resume ()))))
 
 (emit "1st!")
@@ -617,10 +619,10 @@ type-checking strategies.
 ;; Would otherwise be something closer to:
 (handle
   (emit msg)
-    (block
-      (println "{}" msg)
+    (begin
+      (println f"{msg}")
       (resume ()))
-  #(block
+  #(begin
     (emit "1st!")
     (emit "2nd"))) ;; This will get very tedious with nested handles.
 
@@ -637,7 +639,7 @@ type-checking strategies.
   (let delay \timeout) ; This also helps the inference engine to infer coeffects.
   (format "https://api.example.com/{}?key={}&delay={}" user-id key delay))
 
-;; To discharge coeffects, we use a provide block instead of a handle block.
+;; To discharge coeffects, we use a provide begin instead of a handle block.
 (let mock [action]
   ;; The same ergonomics as with handle!
   (with (provide { api-key "KEY123", delay 5000 .. }))
@@ -688,8 +690,9 @@ type-checking strategies.
   ;; The refinement allows us to remove runtime checks from this get call!
   (Array/get arr i))
 
-;; You can also move the predicates into claims! Very similar to LiquidHaskell's predicates.
-(claim in-bounds [i arr]
+;; You can also move the inline predicates to predicate definations! Very similar to
+;; LiquidHaskell's predicates.
+(predicate in-bounds [i arr]
   (&& (>= i 0) (< i (Array/length arr))))
 
 ;; And use it in the predicate position:

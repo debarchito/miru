@@ -232,7 +232,7 @@ and read_type_form = function
       read_let_form (Form.Symbol "let" :: rest)
   | Form.Symbol "fn" :: _ as forms ->
       read_fn_form forms
-  | Form.Symbol "block" :: body ->
+  | Form.Symbol "begin" :: body ->
       Form.Block body
   | Form.Symbol spec :: arg :: rest when spec = "rec" || spec = "mut" ->
       let arg' = if spec = "mut" then Form.Field arg else arg in
