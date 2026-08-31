@@ -43,9 +43,29 @@ type-checking strategies.
   (println (f"{}" (<> "Hello, " name)))
   ;; You can also insert the value inside the {...}!
   (let msg (<> "Hello, " name))
-  (println f"{name}") ; println MUST take an f-string!
+  (println f"{msg}") ; println MUST take an f-string!
   (println f"I've been greeting a lot today, isn't it {name}?"))
   ;; Modular implicits allow locally-resolved typeclass-like features.
+
+;; Miru also has support for raw strings and string tags.
+
+"I'm a normal string"
+(json)"{"name":"miru"}"(json) ; Tagged strings.
+
+r"This is a raw \n string"
+r(json)"{"name":"miru"}"(json) ; Raw strings can also be tagged!
+
+(let interpolate "perform interpolation!")
+rf"This is a raw string but can {interpolate}"
+
+;; The "f" suffix can be repeated to change evaluation sementics:
+(let value "Miru")
+rff(json)"{"name":"{{value}}"}"(json)
+
+;; Rule of thumb:
+;; f -> {...}
+;; ff -> {{...}}
+;;; fff -> {{{...}}} and so on.
 
 ;; Recursive functions need to be marked with a "rec" specifier.
 ;; Specifiers are special positional properties attached to labels.
@@ -75,7 +95,7 @@ type-checking strategies.
 
 ;; This makes composition really clean.
 ;; :(...) are lists!
-(let new-list (map (* 2) :(1 2 3 4)) ; :(2 4 6 8)
+(let new-list (map (* 2) :(1 2 3 4))) ; :(2 4 6 8)
 
 ;; You can use (begin ...) to group multiples expressions in a sequential scope.
 ;; let uses sequential binding, similar to let* in Scheme. They are similar to
@@ -262,7 +282,7 @@ type-checking strategies.
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
 ;; We'll take any record as input that has an "id" field. < ... > are rows!
-(val print-id : < id : string | _ > -> unit
+(val print-id : < id : string | _ > -> unit)
 (let print-id [record]
   (println (f"{}" (.id record)))) ; Nominal types can seamlessly fit here!
 
@@ -361,7 +381,7 @@ type-checking strategies.
     ;; The compiler is smart enough to optimize .<prop> into offsets instead of
     ;; using evidence passing!
     (println (f"Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r))))
-    ;;             ^        <->        ^ double braces to escape!
+    ;;               ^        <->        ^ double braces to escape!
   
 ;; We use the "alias" specifier to create type aliases.
 (type (alias word) (option int)) ; Why would anyone want an optional word :}
@@ -484,7 +504,7 @@ type-checking strategies.
   (with
     (handle
       (get ()) !state
-      (set x)  (:= x state))))
+      (set x)  (:= x state)))
 
   ;; Now we can call the function without fear!
   (action ()))
