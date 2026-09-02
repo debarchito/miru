@@ -676,25 +676,61 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; compile-time safety constraints.
 
 ;; Miru's tagged template readers provide the same expression power as
-;; OCaml PPX transformers. This also mean, they come with their own set
-;; of downsides: fragility, hygiene and most importantly they are untyped!
+;; OCaml PPX transformers. Hence, they come with their own set of downsides:
+;; fragility, hygiene and most importantly they are untyped!
 ;; While they are very powerful compiler extensions, a typed subset makes
 ;; day-to-day utilities feel less like a chore. Miru takes a lot of
 ;; inspiration from MetaOCaml to implement expression values, and the two
 ;; basic constructs to build them: quoting and splicing.
 
 ;; These are just normal Miru functions that modify (expr 'a) just like any
-;; other data structure! It is also known as multi-stage expansion.
+;; other data structure!
 (val unroll : int -> (expr int) -> (expr int))
 (let (rec unroll) [n x] 
   (match n
     0 `1 ; Quoting!
     1 x
-    _ `(* $x $(unroll (-n 1) x)))) ; Both $(<token>) and $<token> are splices!
+    _ `(* $x $(unroll (- n 1) x)))) ; Both $(<token>) and $<token> are splices!
 
-;; (expand ...) is a special form that evaluates ANY (expr 'a) and inlines it at
-;; compile-time.
-(let value (expand (unroll 4 `3))) ; (* 3 (* 3 (* 3 (* 3 1))))
+;; Miru implements multi-stage programming (MSP) such that quotes increment the stage while
+;; splices decrement the stage; `(...) and $(...) are syntactic and are intertwined
+;; with each other. There are two phasing bridges: (lift <x>) turns a stage-x value
+;; into a stage-(x + 1) value i.e. 'a -> (expr 'a) while (lower <x>) evalues a stage-(x + 1)
+;; value to produce a stage-x value i.e. (expr 'a) -> 'a.
+
+;; `unroll` returns a value of type (expr int) thus, making it stage-1.
+(let value (lower (unroll 4 `3))) ; `lower` drops it to stage-0 by evaluating it.
+
+;; Rule of thumb: stage = count of `expr`.
+;; e.g. (expr (expr (expr int))) is stage-3.
+
+;; MSP is phase-agnostic i.e. you could expand the expressions either at compile-time or
+;; at runtime. So, how do we drive the context? We divide it. `lower` lowers the expression
+;; at runtime, while `realize` realizes the expression at compile-time. 
+
+(let value (realize (unroll 4 `3))) ; It will be realized at compile-time unlike `lower`.
+
+;; This allows you to mix and match code that evalues at compile-time with code that should evaluate
+;; at runtime. That said, there is a specific rule that must be followed at stage-0: you can lower an
+;; expression that realizes but not realize an expression that lowers. The idea is rather simple:
+;; `lower` waits till runtime to compile an expression while `realize` expects the expression to
+;; evaluate entirely at compile-time.
+
+;; Let's take this function for e.g.
+(let illegal [quote]
+  (let x (lower quote)) ; ERROR! Trying to lower at compile-time (stage-0) is a violation!
+  (lift x))
+
+(realize (illegal `(+ 1 2)))
+
+;; This on the other hand is fine!
+(let legal [quote]
+  `(lower $quote)) ; `lower` is at stage-1, so it's fine!
+
+(realize (legal `(+ 1 2)))
+
+;; This rule exists to preserve compile-time determinism while allowing users to do so at runtime.
+;; To track this in the type-system Miru models capabilities using it's powerful coeffect system.
 
 ;; Miru integrates SMT solvers to provide native support for Liquid Refinement
 ;; types! A rather common runtime check is array bounds but with liquid types,
