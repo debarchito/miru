@@ -711,21 +711,21 @@ rff(json)"{"name":"{{value}}"}"(json)
 (let value (realize (unroll 4 `3))) ; It will be realized at compile-time unlike `lower`.
 
 ;; This allows you to mix and match code that evalues at compile-time with code that should evaluate
-;; at runtime. That said, there is a specific rule that must be followed at stage-0: you can lower an
-;; expression that realizes but not realize an expression that lowers. The idea is rather simple:
+;; at runtime. That said, there is a specific rule that must be followed: you can lower an expression
+;; that realizes but not realize an expression that lowers at the same stage. The idea is rather simple:
 ;; `lower` waits till runtime to compile an expression while `realize` expects the expression to
 ;; evaluate entirely at compile-time.
 
 ;; Let's take this function for e.g.
 (let illegal [quote]
-  (let x (lower quote)) ; ERROR! Trying to lower at compile-time (stage-0) is a violation!
+  (let x (lower quote)) ; ERROR! Trying to lower and realize at the same stage is a violation!
   (lift x))
 
 (realize (illegal `(+ 1 2)))
 
 ;; This on the other hand is fine!
 (let legal [quote]
-  `(lower $quote)) ; `lower` is at stage-1, so it's fine!
+  `(lower $quote)) ; `lower` is at stage-(realize + 1), so it's fine!
 
 (realize (legal `(+ 1 2)))
 
