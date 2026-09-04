@@ -517,29 +517,44 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Like Koka, control operations default to one-shot resumptions: `k` can be
 ;; called at MOST ONCE (0 times to abort, or 1 time to resume).
 
-;; Lets model generators!
-(effect (gen 'a)
+;; Lets model interators by modeling the states.
+(type (iterator 'a)
+  (Done)
+  (Next ['a (unit -> (iterator 'a))]))
+
+;; Now, a control operation to yield values.
+(effect (yield 'a)
   (control yield : 'a -> unit))
 
-;; A function that performs the generator effect.
-(val range : int -> int -> unit / < (gen int) .. >)
-(let range [start end]
-  (if (<= start end)
-    (begin
-      (yield start)
-      (range (+ start 1) end))
-    ()))
+;; Let's define the main iter function.
+(val iterate : (unit -> unit / < (yield 'a) .. > -> (iterator 'a)))
+(let iterate [action])
+  (handle (action ())
+    (return _)
+      (Done)
+    (yield x)
+      (Next [x #(resume ())])))
 
-(val run-print-gen : (unit -> unit / < (gen int) | 'e >) -> unit / < 'e >)
-(let run-print-gen [action]
-  (with (yield item) ; Syntactic sugar for a single-operation effect handle!
-    (println f"Yielded: {item}")
-    (resume ()))
- 
-  (action ()))
+;; And a function that produces some result.
+(val run-print : (iterator int) / < 'e > -> unit / < 'e >)
+(let run-print [iter]
+  (match iter
+    (Done)
+      ()
+    (Next [item next])
+      (begin
+        (println f"Yielded: {item}")
+        (run-print (next ())))))
 
-(run-print-gen #(range 1 3))
-;; Output:
+;; Build the iterator.
+(let my-iterator
+  (iter #(
+    (yield 1)
+    (yield 2)
+    (yield 3))))
+
+;; And run it!
+(run-print my-iterator)
 ;; Yielded: 1
 ;; Yielded: 2
 ;; Yielded: 3
