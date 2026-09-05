@@ -6,7 +6,7 @@
  (foreign_archives miru_machine)
  (c_library_flags -lpthread -ldl))
 
-;; when using dune outside the Nix sandbox, invoke cargo to build
+;; When using dune outside the Nix sandbox, invoke cargo to build
 ;; the static object.
 
 (rule
@@ -29,7 +29,7 @@
    -p
    miru-machine)))
 
-;; when using crane inside the Nix sandbox, use the static object
+;; When using crane inside the Nix sandbox, use the static object
 ;; prepared by crane.
 
 (rule

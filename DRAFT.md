@@ -744,17 +744,21 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 (realize (legal `(+ 1 2)))
 
-;; This rule exists to preserve compile-time determinism while allowing users to do so at runtime.
-;; To track this in the type-system Miru models capabilities using it's powerful coeffect system.
+;; This rule exists to preserve compile-time determinism while allowing users
+;; to do so at runtime. To track this in the type-system Miru models capabilities
+;; using it's powerful coeffect system.
 
 ;; Miru integrates SMT solvers to provide native support for Liquid Refinement
 ;; types! A rather common runtime check is array bounds but with liquid types,
 ;; you can prove that an index never leaves the array's bounds at compile-time!
 
 ;; Parameterizing length directly in the array type:
-(val get-at : (arr : (array 'a)) -> (i : int | (&& (>= i 0) (< i (Array/length arr)))) -> 'a)
+(val get-at : (arr : (array 'a))
+           -> (i   : int | (&& (>= i 0) (< i (Array/length arr))))
+           -> 'a)
 ;; Refinement uses the pipe (|) operator.
-;; (Array/length arr) here works as a reflected measure! More on measures and reflections later.
+;; (Array/length arr) here works as a reflected measure! More on measures and
+;; reflected functions later.
 
 ;; The compiler will ensure that 0 <= i < length(arr) always holds true.
 (let get-at [arr i]
@@ -767,7 +771,27 @@ rff(json)"{"name":"{{value}}"}"(json)
   (&& (>= i 0) (< i (Array/length arr))))
 
 ;; And use it in the predicate position:
-(val get-at : (arr : (array 'a)) -> (i : int | (in-bounds i arr)) -> 'a)
+(val get-at : (arr : (array 'a))
+           -> (i   : int | (in-bounds i arr))
+           -> 'a)
+
+;; Contract-based specification literature often uses terms like "requires" to define
+;; pre-conditions, "modifies" to track the set of plausibly mutable values, and "ensures"
+;; to define post-conditions. Miru's SMT implementation tries to unify them under one
+;; belt by taking advantage of what the type systems already provides:
+;; 1) You can bind names to positional types, thus making them referenceable.
+;; 2) Mutability being a property of the data-structure makes mutation sets inferable.
+;; 3) Pre-conditions and post-conditions can be merged into a single expression.
+
+;; A more thorough e.g. of merged conditions:
+(val safe-div : (num   : int)
+             ;; The merger simply dissolves into the "conditions that matter" for a type.
+             -> (denom : int | (!= denom 0))
+             -> (res   : int | (== (* res denom) num)))
+
+;; NOTE: While allowed, non-linear arithmetic like x * y is undecidable, but you
+;; can treat them as uninterpreted functions to modify the approach the solver
+;; takes.
 ```
 
 TODO!
