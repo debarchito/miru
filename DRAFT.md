@@ -820,6 +820,42 @@ $(legal `(+ 1 2))
 ;; NOTE: While allowed, non-linear arithmetic like x * y is undecidable, but you
 ;; can treat them as uninterpreted functions to modify the approach the solver
 ;; takes.
+
+;; Let's talk about procedural macros. MSP handles most of the usecases one would like to
+;; use macros for in languages like Rust but they can't extend the syntax of the language.
+;; Macros-based reflection is also a great way to cover the grounds given Miru doesn't
+;; provide any *intrinsic* support for reflection; neither static nor dynamic. The macro
+;; model is very similar to Rust. Procedural macros can be of two forms: function-style
+;; macros and attribute macros.
+
+;; Example of a function-style macro that embeds an HTML-esque DSL:
+(#html ; Macro invocation looks similar to functions but are prepended with a #!
+  <html>
+    <head>
+      <title>This is a new one!</title>
+    </head>
+    <body>
+      <button>This button does nothing so far...</button>
+    </body>
+  </html>)
+
+;; Example of an attribute macro that derives a modular implicit for a type:
+#[(derive Show)]
+(type colors
+  (Red   int)
+  (Green int)
+  (Blue  int))
+
+;; Other forms include:
+#[shiny-macro]
+#[(shiny-macro-with-payload ...)]
+;; "..." has the same syntax freedom as (#<name> ...) which is passed as TokenStream.
+
+;; These were the examples of outer attributes i.e. applied to the specific term
+;; immediately following them. Miru has has inner attributes which are applied to the
+;; module itself.
+
+#![allow(dead-code)] ; You'll see them often when dealing with module level options.
 ```
 
 TODO!
