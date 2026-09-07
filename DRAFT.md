@@ -8,8 +8,8 @@ finalized. I've tried to format it similar to
 
 Miru is a strictly evaluated functional language that borrows much of its syntax
 from languages like Clojure, Carp et al. while implementing the semantics of
-languages like OCaml and Haskell with great premise on Algebraic Effects and
-Effect tracking. It's designed to be pragmatic and useful for day to day general
+languages like OCaml and Koka with great premise on Algebraic Effects and Effect
+tracking. It's designed to be pragmatic and useful for day to day general
 purpose tasks while also being a great fit for doing math and science.
 
 It is strongly and statically typed, but instead of using manually written type
@@ -20,34 +20,35 @@ type-checking strategies.
 ```clojure
 ;; This is a standalone comment.
 
-;; Variables and functions are both defined using the let keyword.
-(let name "Miru") ; Inline comments use a single ";"
+;; Bindings defined using the let keyword.
+(let name "Miru") ; Inline comments use a single ";" by convention.
 
 ;;; This is a documentation comment for the greet function that takes an
 ;;; argument name inferred as string.
 (let greet [name]
-  ;; f-strings are special format strings! They are desugared into
-  ;; GADT-powered contexts, very similar to OCaml and Haskell!
+  ;; f-strings are special format strings. They are desugared into
+  ;; GADT-powered contexts, very similar to OCaml.
   (println (f"{}" (String/concat "Hello, " name))))
 
-;; You can specify the type definition using a (val ...) expression.
-;; The type signature are written in curried form. Type signatures use infix
-;; forms which is how you would define them in mathematics. The type unit is
-;; special because Miru doesn't have an equivalent of nil as a primitive.
-;; Additionally, like most functional languages Miru lacks procedures. Every
-;; function must return something even if it's an unit.
+;; You can specify the type of a binding using a (val ...) expression.
+;; The type signatures are written in curried form while using infix
+;; applications (->). The type unit is special because Miru doesn't have
+;; an equivalent of nil as a primitive. Additionally, like most functional
+;; languages Miru lacks procedures. Every function must return something
+;; even if it's an unit.
 (val greet : string -> unit)
 (let greet [name]
   ;; "<>" is a semigroup append function. Since string concatenation forms a
-  ;; free semigroup, it behaves the same as String/concat!
+  ;; free semigroup, it behaves the same as String/concat.
   (println (f"{}" (<> "Hello, " name)))
-  ;; You can also insert the value inside the {...}!
+  ;; You can also interpolate a value using {...}.
   (let msg (<> "Hello, " name))
   (println f"{msg}") ; println MUST take an f-string!
   (println f"I've been greeting a lot today, isn't it {name}?"))
-  ;; Modular implicits allow locally-resolved typeclass-like features.
+  ;; Implicit module resolution allow various scope-resolved typeclass-like
+  ;; features you often find in Rust and Haskell.
 
-;; Miru also has support for raw strings and string tags.
+;; Miru has support for raw strings and string tags.
 
 "I'm a normal string"
 (json)"{"name":"miru"}"(json) ; Tagged strings.
@@ -68,15 +69,16 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;;; fff -> {{{...}}} and so on.
 
 ;; Recursive functions need to be marked with a "rec" specifier.
-;; Specifiers are special positional properties attached to labels.
+;; Specifiers are special positional properties attached to labels that can also
+;; be propagated when composed with certain forms.
 (let (rec factorial) [n]
   (if (= n 0)
     1
     (* n (factorial (- n 1)))))
 
-;; Every function must have at least one argument.
-;; Some functions naturally don't take any arguments, so there's "unit" type for
-;; it that has only one value written as "()".
+;; Every function must have at least one argument. Some functions naturally don't
+;; take any arguments, so there's "unit" type for it that has only one value
+;; written as "()".
 (let greet-morning [()]
   (println f"Good morning!"))
 
@@ -89,89 +91,96 @@ rff(json)"{"name":"{{value}}"}"(json)
 (let aliased-greet-morning greet-morning)
 
 ;; Functions are automatically curried.
-(let make-inc [x y] (+ x y)) ; int -> int -> int
-(let inc-2 (make-inc 2)) ; int -> int
-(inc-2 3) ; 5
+(let make-inc [x y] (+ x y)) ; - int -> int -> int = function
+(let inc-2 (make-inc 2)) ; - int -> int = function
+(inc-2 3) ; - int = 5
 
-;; This makes composition really clean.
-;; :(...) are lists!
+;; This makes composition really clean. :(...) are lists.
 (let new-list (map (* 2) :(1 2 3 4))) ; :(2 4 6 8)
 
 ;; You can use (begin ...) to group multiples expressions in a sequential scope.
 ;; let uses sequential binding, similar to let* in Scheme. They are similar to
 ;; let ... in ... expressions in OCaml.
 (begin
-  (let [x 10
-        y (+ x 10)])
+  (let x 10)
+  (let y (+ x 10))
   (+ x y)) ; 30
 
-;; You can utilize (and ...) for parallel bindings.
-;; Seperating "begin", "let" and "and" keeps composition cleaner.
+;; You can utilize tuple unpacking for parallel bindings. It keeps composition
+;; cleaner.
 (begin
   (let a 1)
-  (and
-    (let b (+ a 1)) ; b sees a, but not c.
-    (let c (+ a 2))) ; c sees a, but not b.
-  (let d (+ b c)) ; Sequential again! d sees both b and c.
-  (+ a b c d)) ; Return the final expression!
+  (let [b c] [(+ a 1) (+ a 2)]) ; b and c are not aware of each other.
+  (let d (+ b c)) ; Sequential again: d sees both b and c.
+  (reduce + 0 :(a b c d))) ; Return the final expression.
 
-;; This is especially useful to implement mutually recursive functions so the
-;; compiler can track value bounds. No need for pre-defined symbols!
-(and
-  (let (rec is-even?) [n]
-    (match n
-      0 true
-      n (is-odd? (- n 1))))
-  (let (rec is-odd?) [n]
-    (match n
-      0 false
-      n (is-even? (- n 1)))))
+;; You can use (and ...) alongside (let ...) for parallel bindings too.
+(let (rec is-even?) [n]
+  (match n
+    0 true
+    n (is-odd? (- n 1))))
 
-;; Additionaly, let can also be used for destructuring.
-;; Almost all data structures can be destuctured!
+(and is-odd? [n]
+  (match n
+    0 false
+    n (is-even? (- n 1))))
+
+;; To note, "rec" is viral when composed with (and ...). Similar to OCaml,
+;; let ... and ... are non-recursive parallel bindings while let rec ...
+;; and ... are recursive parallel bindings. You CANT mix recursive and
+;; non-recursive bindings in such cases. Aditionally, functions are closures,
+;; and delayed evaluation allows them to reference each other unlike the
+;; previous case which was eager.
+
+;; This means, the first parallel binding example can also be written as:
+(begin
+  (let a 1)
+  (let b (+ a 1))
+  (and c (+ a 2))
+  (let d (+ b c))
+  (reduce + 0 :(a b c d)))
+
+;; Another unpacking example:
 (let [x y z] [1 2.3 "hello!"])
 (println f"{x} {y} {z}") ; 1 2.3 hello!
 
-;; Since functions are first-class you can always use lambdas.
+;; Since functions are first-class, you can always use lambdas.
 (let square (fn [x] (* x x)))
 
-;; Symbolic functions are completely valid!
-;; They must be defined inside a (...)
+;; Symbolic functions are completely valid, although must be defined inside
+;; a (...).
 (let (~/) [x] (/ 1.0 x))
 (~/ 4.0) ; 0.25
 
 ;; Miru has a lot of data structures. Let's take a look at some of them:
 
 ;; Tuples are immutable, fixed-sized collections of heterogeneous elements.
-;; Tuples are both persistent and a product type!
+;; Tuples are both persistent and a product type.
 [ 1, 2.0 "Hello World" ] ; commas are the same as whitespace.
 
-;; Lists are dynamic, ordered, homogeneous singly linked lists.
-;; Lists are persistent data structures.
-;; Miru doesn't have '(...) for quote blocks so we can't really
-;; use them here. We instead utilize a special :(...) to signify
-;; a linked list!
+;; Lists are dynamic, ordered, homogeneous singly linked lists. Lists are
+;; persistent data structures.
 :( 1 2 3 )
 
-;; Arrays are fixed-sized, contiguous, homogeneous collections.
-;; Unlike OCaml, Miru arrays are immutable.
+;; Arrays are fixed-sized, contiguous, homogeneous collections. Unlike OCaml,
+;; Miru arrays are immutable.
 [| 1 2 3 |]
 
 ;; Mutable arrays are the mutable version of arrays. They allow in-place
-;; mutaiton. In Miru, mutability is a property of data structures. Thus,
-;; Miru has no concept of a mutable pointer.
+;; mutation. In Miru, mutability is a property of data structures. Thus,
+;; Miru has no concept of a mutable pointer (but we can emulate one later).
 [! 1 2 3 !]
 
-;; Dynamic arrays are the resizable version of mutable arrays.
-;; They are also known as vectors in other languages.
+;; Dynamic arrays are the resizable version of mutable arrays. They are also
+;; known as vectors in other languages.
 [~ 1 2 3 ~]
 
-;; Miru is also an array language, which means it has native support for
-;; N-dimentional tensors, both immutable and mutable but non-resizable.
-;; Miru is column-major and 0-indexed.
+;; Miru is an array language, which means it has native support for
+;; N-dimentional tensors, both immutable and mutable but non-resizable. Miru
+;; is column-major and 0-indexed.
 [| 1 4 7 |  ; Pipes to used to segment dimensions.
    2 5 8 |  ; Rule of thumb: tensor dimension = (no. of pipes) + 1
-   3 6 9 |] ; This is a 3x3 matrix!
+   3 6 9 |] ; This is a 3x3 matrix.
 
 ;; The mutable version being:
 [! 1 4 7 |
@@ -182,7 +191,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 [| 1 5 9  |
    2 6 10 ||
    3 7 11 |
-   4 8 12 |] ; This is a 2x2x3 tensor!
+   4 8 12 |] ; This is a 2x2x3 tensor.
 
 ;; Tensors are special because they are NOT arrays of arrays. The elements
 ;; are stored contiguosly in memory and queried via pre-calculated offsets
@@ -193,69 +202,67 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; tensors. Instead, you can use a 1D dynamic array ([~ ... ~]) to handle
 ;; runtime growth/dynamism, and then perform a zero-copy cast into a
 ;; fixed N-dimensional tensor as long as the total element count matches
-;; the target shape!
+;; the target shape.
 
 (let dyn-arr [~ 1 2 3 4 5 6 7 8 9 ~])
 (let result (Tensor/from-dynamic [3 3] dyn-arr))
 
 ;; You get static guarentees about the shape of the data at compiler time
 ;; because Miru supports liquid types for compile-time dimension checking.
-;; More on them later!
+;; More on them later.
 
 ;; Sets are immutable, persistent, purely applicative, unordered (CHAMP),
 ;; homogeneous collections that enforce unique elements. Uses list delimiters
-;; :(...) in the reader phase to signal a heap-allocated tree layout.
-#set :(1 2 3) ; #set is a tagged template reader! More on them later.
+(#set 1 2 3) ; #set is a procedural macro. More on them later.
 ;; or
 (Base/Collections/Set/from-array [| 1 2 3 |])
 
 ;; Hashsets are mutable, non-persistent, unordered (hash-based) linear
-;; collections. Uses flat vector delimiters [| ... |] to signify a contiguous
-;; memory layout (Swiss Table!).
-#hash-set [| 1 2 3 |]
+;; collections.
+(#hash-set 1 2 3)
 ;; or
 (Base/Collections/Set/Hash/from-array [| 1 2 3 |])
 
 ;; Sorted sets are immutable, persistent, value-ordered (Persistent B-Tree)
 ;; collections.
-#sorted-set :(1 2 3)
+(#sorted-set 1 2 3)
 ;; or
 (Base/Collections/Set/Sorted/from-array [| 1 2 3 |])
 
 ;; Ordered sets are immutable, persistent, insertion-ordered (Linked CHAMP)
 ;; collections.
-#ordered-set :(1 2 3)
+(#ordered-set 1 2 3)
 ;; or
 (Base/Collections/Set/Ordered/from-array [| 1 2 3 |])
 
 ;; Bit sets are mutable or unboxed, bitwise-packed sets of non-negative
 ;; integers.
-#bit-set [| 0 1 64 128 |]
+(#bit-set 0 1 64 128)
 ;; or
 (Base/Collections/Set/Bit/from-array [| 0 1 64 128 |])
 
 ;; Maps are immutable, persistent, purely applicative, unordered (CHAMP),
-;; homogeneous key-value collections.
-#map { id 1 } ; Borrows the struct body form.
+;; homogeneous key-value collections. It's common to use [x y] as a pair.
+(#map [id 1]) ; Borrows the struct body form.
 ;; or
 (Base/Collections/Map/from-array [| ["id" 1] |])
 
 ;; Hashmaps are mutable, non-persistent, unordered (hash-based) linear
 ;; key-value maps.
-#hash-map { id 1 }
+(#hash-map [id 1])
 ;; or
 (Base/Collections/Map/Hash/from-array [| ["id" 1] |])
 
 ;; Sorted maps are immutable, persistent, value-ordered (Persistent B-Tree)
 ;; key-value maps. Orders entries by key comparison to enable range queries
 ;; and bounds slicing.
-#sorted-map { id 1 }
+(#sorted-map [id 1])
 ;; or
 (Base/Collections/Map/Sorted/from-array [| ["id" 1] |])
 
 ;; Ordered maps are immutable, persistent, insertion-ordered (Linked CHAMP)
 ;; key-value maps.
-#ordered-map { id 1 }
+(#ordered-map [id 1])
 ;; or
 (Base/Collections/Map/Ordered/from-array [| ["id" 1] |])
 
@@ -267,7 +274,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Records are product types just like tuples. They are nominal by default but
 ;; can be made structural to explicitly enable row polymorphism.
 (type session
-  { id   : string ; The keys are untagged symbols!
+  { id   : string ; The keys are untagged symbols.
     name : string })
 
 ;; This will be inferred as session. Anonymous definitions are illegal due
@@ -277,16 +284,16 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; To opt into structural typing, append the row operator `..`.
 ;; This forces the compiler to treat the record as an open, anonymous shape
 ;; instead of binding it to a nominal definition.
-(let s2 { id "MIRU", name "Miru Session" .. }) ; Commas are whitespaces!
+(let s2 { id "MIRU" name "Miru Session" .. })
 
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
-;; We'll take any record as input that has an "id" field. < ... > are rows!
+;; We'll take any record as input that has an "id" field. < ... > are rows.
 (val print-id : < id : string | _ > -> unit)
 (let print-id [record]
-  (println (f"{}" (.id record)))) ; Nominal types can seamlessly fit here!
+  (println (f"{}" (.id record)))) ; Nominal types can seamlessly fit here.
 
-;; Both of these work!
+;; Both of these work:
 (print-id s1) ; s1 is nominal.
 (print-id s2) ; s2 is structural.
 
@@ -304,18 +311,18 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Records can have mutable fields.
 (type person
   { name      : string
-    (mut age) : int }) ; "mut" is also a specifier but for fields!
+    (mut age) : int }) ; "mut" is also a specifier but for fields.
 
 (let p1 { name "John Doe" age 30 })
 
-;; Miru has a single "<-" (mutating) primitive function.
-;; All operations are data-last.
+;; Miru has a single "<-" (mutating) primitive function. All operations are
+;; data-last.
 (<- person.age 31 p1)
 
 (person.age p1) ; 31
 
 ;; We can use this property to build a ref cell around records.
-(type (ref 'a) ; 'a is also known as alpha; a unification variable.
+(type (ref 'a) ; 'a is also known as alpha which is a unification variable.
   { (mut contents) : 'a })
 
 ;; We can use ref cells to simulate mutable bindings.
@@ -323,13 +330,13 @@ rff(json)"{"name":"{{value}}"}"(json)
 (println (f"{}" (ref.contents name))) ; Miru
 
 (<- ref.contents "MIRU" name)
-;; This also works.
+;; This naturally works.
 (println (f"{}" (.contents name))) ; MIRU
 
-;; This is a very useful construct and the base will provide it by default.
+;; This is a very useful construct and the Base will provide it by default.
 ;; Mutating and de-referencing is common enough that Miru has a built-in
-;; functions for references, and a symbolic function for mutation. This is
-;; similar to OCaml and Koka. !<id> is implemented as a special reader.
+;; reader (!<id>) for references, and a symbolic function for mutation. This
+;; is similar to OCaml.
 (:= "Miru" name)
 (println (f"{}" !name)) ; Miru
 
@@ -338,27 +345,27 @@ rff(json)"{"name":"{{value}}"}"(json)
 (let (:=) [value container]
   (<- ref.contents value container))
 
-;; We can also use the type expression to define sum or variant types.
-;; '<id> is reserved for type variables in Miru not quoting.
-;; Infact, Miru only supports *typed* quasi-quoting using `(...) which
-;; evaluate to an (expr 't) data-structure. More on them later!
+;; We can also use the type expression to define sum or variant types. '<id> is
+;; reserved for type variables in Miru, not quoting. Infact, Miru only supports
+;; *typed* quasi-quoting using `(...) which evaluate to an (expr 't) data-structure.
+;; More on them later.
 (type shape
-  (Circle < radius : float .. >)) ; Variant constructors must be capitalized!
+  (Circle < radius : float .. >)) ; Variant constructors must be capitalized.
 
 (let [basic-circle { radius 5.0 .. }
       fancy-circle { radius 10.0 color "red" .. }
       shape-1 (Circle basic-circle)
-      shape-2 (Circle fancy-circle)]) ; Both are valid!
+      shape-2 (Circle fancy-circle)]) ; Both are valid.
 
 ;; Let's look at more examples of variant types:
 (type colors
   (White)
   Gray ; Parens are optional for constructors with no payload.
   (Black)
-  (RGB [int int int]) ; Tuple variants are also allowed!
+  (RGB [int int int]) ; Tuple variants are also allowed.
   (HSL { h int, s int, l int })) ; Record variants as usual.
 
-;; The constructors are made available in the global space.
+;; The constructors are made available in the global scope.
 (let a White)
 (let b (RGB [240 80 40]))
 (let c (HSL { h 240, s 80, l 40 }))
@@ -367,44 +374,45 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Record variants are strictly normial even though records can be structural.
 ;; Match expressions are really handy when it comes to ADTs.
 (match a
-  ;; Just like (and ...), (or ...) are special context-resolvers.
-  ;; Here, they together with "match" replace the need of a "|" operator.
+  ;; (or ...) is a special form inside a match expression forming a union.
   (or White Gray Black)
     (println f"Got constructors with no payload!")
 
   (RGB t)
-    ;; The tuple t is refined in this scope, so we can use .<prop> syntax!
+    ;; The tuple t is refined in this scope, so we can use .<prop> syntax.
     (println (f"Got: {} * {} * {}" (.0 t) (.1 t) (.2 t)))
 
   (HSL r)
-    ;; Same goes for the record r!
-    ;; The compiler is smart enough to optimize .<prop> into offsets instead of
-    ;; using evidence passing!
-    (println (f"Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r))))
-    ;;               ^        <->        ^ double braces to escape!
+    ;; Same goes for the record r. The compiler is smart enough to optimize
+    ;; .<prop> into offsets instead of using evidence passing.
+    (println (f"Got: \{ h {}, s {}, l {} \}" (.h r) (.s r) (.l r)))
+    ;;               ^        <->        ^ \{ or \} to escape interpolation.
+    ;; or just:
+    (println (ff"Got: { h {{}}, s {{}}, l {{}} }" (.h r) (.s r) (.l r))))
+    ;; Any of these work.
   
 ;; We use the "alias" specifier to create type aliases.
-(type (alias word) (option int)) ; Why would anyone want an optional word :}
+(type (alias word) (option int)) ; Why would anyone want an optional word :O?
 
-;; We can also use (and ...) for mutually recursive types!
-;; Types also require the "rec" specifier. Implicit recursion is not allowed
-;; anywhere.
-(and
-  (type (rec expression)
-    (Literal  int)
-    (Variable string)
-    (Block    (list statement)))
-  (type (rec statement)
-    (Assignment      [string expression])
-    (If-then-else    [expression statement statement])
-    (Void-expression expression)))
+;; We can also use (and ...) for mutually recursive types! Unlike OCaml, types
+;; require the "rec" specifier. Implicit recursion is not allowed anywhere in
+;; Miru.
+(type (rec expression)
+  (Literal  int)
+  (Variable string)
+  (Block    (list statement)))
 
-;; Let's build a tree for an example!
+(and statement
+  (Assignment      [string expression])
+  (If-then-else    [expression statement statement])
+  (Void-expression expression)))
+
+;; Let's build a tree for an example.
 (type (tree 'a)
   Empty
   (Node [(tree 'a) 'a (tree 'a)]))
 
-;; And use it.
+;; And use it:
 (let example-tree
   (Node [
     (Node [Empty 7 Empty])
@@ -412,12 +420,12 @@ rff(json)"{"name":"{{value}}"}"(json)
     (Node [Empty 9 Empty])]))
 
 ;; Variants are closed by nature. You can't extend them. This is where
-;; structural variants come into picture! They operate the same way
-;; you would expect them to behave in OCaml! This is also powered using
+;; structural variants come into picture; they operate the same way
+;; you would expect them to behave in OCaml. This is also powered using
 ;; row-polymorphism but extended to variants. They are open and can form
 ;; a structural union.
 (type small < :A :B >)
-(type large < :A :B :C (:D string) .. >) ; They can have payloads!
+(type large < :A :B :C (:D string) .. >) ; They can have payloads as usual.
 
 ;; They look a lot like keywords in Clojure but statically typed. Infact,
 ;; they are a drop-in replacement for a lot of cases where you'd
@@ -431,11 +439,11 @@ rff(json)"{"name":"{{value}}"}"(json)
     _            "?")))
 
 (let (item : small) :A)
-(let (process-large item)) ; ERROR! small is not compatible with large.
-(let (process-large (:> item large))) ; Works!
-;; Type coercion is explicit in Miru! ":>" is the coercion operator.
+(let (process-large item)) ; ERROR: small is not compatible with large.
+(let (process-large (as item large))) ; This works.
+;; Type coercion is explicit in Miru where "as" is the coercion special form.
 
-;; The colors variant e.g. but with structural variants:
+;; The colors variant example but with structural variants:
 (type colors
   < :White
     :Gray
@@ -443,24 +451,24 @@ rff(json)"{"name":"{{value}}"}"(json)
     (:RGB [int int int])
     (:HSL { h int, s int, l int }) >)
 
-;; Time to introduce GADTs!
-;; For this e.g., let's model an expresssion evaluator.
+;; Let's introduce GADTs. For this example, let's model an expresssion
+;; evaluator.
 (type (exp _) ; The type variable we'll specialize.
   ;; Notice the ":" after the constructor. You MUST specify the returning
-  ;; type. Specialization is explicit!
+  ;; type. Specialization is explicit.
   (Int     : int                   -> (exp int))
   (Bool    : bool                  -> (exp bool))
   (Add     : [(exp int) (exp int)] -> (exp int))
   (Is-zero : (exp int)             -> (exp bool)))
 
 ;; (type a) introduces a locally abstract type called "a." They are NOT
-;; type variables! A type variable is a flexible placeholder that can unify
+;; type variables. A type variable is a flexible placeholder that can unify
 ;; with any type, while a locally abstract type creates a rigid, newly
 ;; minted type identity scoped strictly inside that function. They are what
-;; enable local type refinement which is crucial to make GADTs work!
+;; enable local type refinement which is crucial to make GADTs work.
 (val eval : (type a) . (exp a) -> a)
-(let (rec eval) [e] ; The "rec" specifier is a property of the binding!
-  ;; The abstract type "a" is refined in the branches!
+(let (rec eval) [e] ; The "rec" specifier is a property of the binding not type.
+  ;; The abstract type "a" is refined in each branch independently.
   (match e
     (Int n)     n
     (Bool b)    b
@@ -473,20 +481,22 @@ rff(json)"{"name":"{{value}}"}"(json)
 (let bad-exp (Add (Int 5) (Bool true))) 
 ;;                        ^^^^^^^^^^^ Expected (exp int), got (exp bool)
 
-;; Let me introduce you the crown jewel: effects. We define a simple
+;; It's about time we introduce algebraic effects. For example, we define a simple
 ;; effect with two distinct effect operations. There are different kinds of
-;; effect operation types: direct operations, one-shot controls, tail-resuming
-;; one-shot controls, and muli-shot controls.
+;; effect operation types: direct operations, one-shot controls, non-resuming
+;; operations, muli-shot controls and raw controls. The order is intentional.
+
 (effect (state 'a)
   ;; These are examples of direct operations. They are used when you want to
-  ;; perform an operation and return a value directly back to the perform site.
-  ;; They can resume exactly once and have no access to a continuation. They read
-  ;; and are typed exactly like functions.
+  ;; perform an operation and return a value directly to the perform site while
+  ;; having tail-resumption as a guarentee. They can resume exactly once and
+  ;; have no access to a continuation because they do not allocate one! They
+  ;; are read and typed exactly like normal functions.
   (val get : unit -> 'a) 
   (val set : 'a -> unit))
 
-;; Now, we define a function that performs the console effect.
-;; Miru tracks the set of effect types as effect rows. They support row-polymorphism.
+;; Now, we define a function that performs the state effect. Miru tracks the
+;; set of effect types as effect rows. They support row-polymorphism.
 (val increment-by : int -> int / < (state int) .. >)
 (let increment-by [amount]
   (let current (get ()))
@@ -495,7 +505,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Now, let's write a handle for the function. It reduces the state effect
 ;; from the row using row variables.
-(val run-state : (int -> int / < (state int) | 'e>) -> int / < 'e >)
+(val run-state : (int -> int / < (state int) | 'e >) -> int / < 'e >)
 (let run-state [init action]
   (let state (ref init))
 
@@ -506,7 +516,7 @@ rff(json)"{"name":"{{value}}"}"(json)
       (get ()) !state
       (set x)  (:= x state)))
 
-  ;; Now we can call the function without fear!
+  ;; We can call this function safely.
   (action ()))
 
 ;; #(...) are anonymous functions.
@@ -514,7 +524,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 (println f"{res}") ; 15
 
 ;; Control operations capture the delimited continuation `k` at the perform site.
-;; Like Koka, control operations default to one-shot resumptions: `k` can be
+;; Unlike Koka, control operations default to one-shot resumptions: `k` can be
 ;; called at MOST ONCE (0 times to abort, or 1 time to resume).
 
 ;; Lets model interators by modeling the states.
@@ -526,7 +536,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 (effect (yield 'a)
   (control yield : 'a -> unit))
 
-;; Let's define the main iter function.
+;; Let's define the main iterate function.
 (val iterate : (unit -> unit / < (yield 'a) .. > -> (iterator 'a)))
 (let iterate [action])
   (handle (action ())
@@ -553,7 +563,7 @@ rff(json)"{"name":"{{value}}"}"(json)
     (yield 2)
     (yield 3))))
 
-;; And run it!
+;; And run it:
 (run-print my-iterator)
 ;; Yielded: 1
 ;; Yielded: 2
@@ -578,7 +588,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 (let run-exn [action]
   (with (throw err)
     (println f"Caught error: {err}")
-    None) ; We cannot use resume here.
+    (None)) ; We cannot use resume here.
   
   (Some (action ())))
 
@@ -601,15 +611,13 @@ rff(json)"{"name":"{{value}}"}"(json)
     (+ x 10)
     (+ x 0)))
 
-;; Handler for non-deterministic choice using `with`.
-;; Handlers handling multi-shot effects require a `return` clause (value clause)
-;; to wrap the base leaf results into a collection.
+;; Handler for non-deterministic choice using `with`. Aditionally, handles handling any
+;; effect can use a `return` clause (value clause) to wrap values if needed.
 (val handle-amb : (unit -> 'a / < amb | 'e >) -> (list 'a) / < 'e >)
 (let handle-amb [action]
   (with
     (handle
-      ;; Wrap the normal completion result in a list. This is special, and also
-      ;; known as the value clause.
+      ;; Wrap the normal completion result in a list.
       (return v)
         :(v)
 
@@ -621,6 +629,22 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 (let res (handle-amb #(choices 5)))
 (println f"{res}") ; :(15 5)
+
+;; Raw controls provide unmanaged, direct access to the raw underlying continuation 
+;; fiber without automatically re-installing the enclosing handler scope upon resumption. 
+;; This is the escape hatch used to implement low-level concurrency primitives, 
+;; custom green-thread schedulers, or delimited control operators like shift/reset.
+;; Let's reimplement the interate function from the "control" example:
+
+(val iterate : (unit -> unit / < (yield 'a) .. > -> (iterator 'a)))
+(let iterate [action])
+  (handle (action ())
+    (return _)
+      (Done)
+    [(yield x) context] ; Raw controls pass their raw context!
+      (Next [x #(resume context ())]))) ; You need to resume WITH the context.
+
+;; Raw controls destruct context so they are strictly one-shot.
 
 ;; Let's take a bit of time to understand the with-expression. Here are some
 ;; cases. First is the case for a scoped resource manager.
@@ -666,22 +690,22 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Instead of bubbling up to a handle, coeffects represent dynamic contexts 
 ;; injected down into the function before it can execute. 
 
-;; Miru tracks coeffect rows using a backslash `\`. Just like effect, coeffects also
-;; support row-polymorphism.
+;; Miru tracks coeffect rows using a backslash `\`. Just like effect, coeffects
+;; also support row-polymorphism.
 (val fetch-user-data : string \ < api-key : string, timeout : int .. > -> string)
 (let fetch-user-data [user-id]
-  (let key \api-key) ; \<token> is how you read from a coeffect!
-  (let delay \timeout) ; This also helps the inference engine to infer coeffects.
+  (let key \api-key) ; \<token> is how you read from a coeffect.
+  ;; You can always use them with (as ...) to help the type system.
+  (let delay (as \timeout int)) ; 'a -> int
   (format "https://api.example.com/{}?key={}&delay={}" user-id key delay))
 
 ;; To discharge coeffects, we use a provide begin instead of a handle block.
 (let mock [action]
-  ;; The same ergonomics as with handle!
   (with (provide { api-key "KEY123", delay 5000 .. }))
-  (with (provide { delay 10000 .. })) ; Overwrites the 5000 timeout!
+  (with (provide { delay 10000 .. })) ; Shadows the timeout.
   (action ()))
 
-(mock #(fetch-user-data "user_miru")) ; Simple as that!
+(mock #(fetch-user-data "user_miru"))
 
 ;; It's nice to think it in terms of: you handle effects and provide contexts.
 ;; Effects capture dynamic control flow operations that bubble up the stack,
@@ -690,22 +714,22 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; environment before executing. Coeffects are really useful to enable
 ;; compile-time safety constraints.
 
-;; Miru's tagged template readers provide the same expression power as
-;; OCaml PPX transformers. Hence, they come with their own set of downsides:
-;; fragility, hygiene and most importantly they are untyped!
-;; While they are very powerful compiler extensions, a typed subset makes
-;; day-to-day utilities feel less like a chore. Miru takes a lot of
-;; inspiration from MetaOCaml to implement expression values, and the two
-;; basic constructs to build them: quoting and splicing.
+;; Miru's procedural macros provide the same expression power as OCaml PPX
+;; rewriters. Hence, they come with their own set of downsides: fragility,
+;; hygiene and most importantly they are untyped. While they are very powerful
+;; compiler extensions, a typed subset makes day-to-day utilities feel less like
+;; a chore. Miru takes a lot of inspiration from MetaOCaml, Scala, Nim, MacoCaml
+;; to implement expression values, and the two basic constructs to build them:
+;; quoting and splicing.
 
 ;; These are just normal Miru functions that modify (expr 'a) just like any
-;; other data structure!
+;; other data structure.
 (val unroll : int -> (expr int) -> (expr int))
 (let (rec unroll) [n x] 
   (match n
-    0 `1 ; Quoting!
+    0 `1 ; This is quoting.
     1 x
-    _ `(* $x $(unroll (- n 1) x)))) ; Both $(<token>) and $<token> are splices!
+    _ `(* $x $(unroll (- n 1) x)))) ; Both $(<token>) and $<token> are splices.
 
 ;; Miru implements multi-stage programming (MSP) such that quotes increment the stage while
 ;; splices decrement the stage; `(...) and $(...) are syntactic and are intertwined
@@ -721,7 +745,8 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; MSP is phase-agnostic i.e. you could expand the expressions either at compile-time or
 ;; at runtime. So, how do we drive the context? We divide it. `lower` lowers the expression
-;; at runtime, while `realize` realizes the expression at compile-time. 
+;; at runtime, while `realize` realizes the expression at compile-time. Both are a form of
+;; "lowering" values.
 
 (let value (realize (unroll 4 `3))) ; It will be realized at compile-time unlike `lower`.
 
@@ -740,13 +765,16 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; This on the other hand is fine!
 (let legal [quote]
-  `(lower $quote)) ; `lower` is at stage-(realize + 1), so it's fine!
+  `(lower $quote)) ; `lower` is at stage-(realize + 1), so it's allowed.
 
 (realize (legal `(+ 1 2)))
 
 ;; This rule exists to preserve compile-time determinism while allowing users
 ;; to do so at runtime. To track this in the type-system Miru models capabilities
-;; using it's powerful coeffect system.
+;; using it's powerful coeffect system. Additionally, realization is such a common
+;; operation that Miru has a simple top-level reader for it which mirrors splicing:
+
+$(legal `(+ 1 2))
 
 ;; Miru integrates SMT solvers to provide native support for Liquid Refinement
 ;; types! A rather common runtime check is array bounds but with liquid types,
