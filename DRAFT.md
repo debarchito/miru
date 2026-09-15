@@ -385,8 +385,8 @@ rff(json)"{"name":"{{value}}"}"(json)
   (HSL r)
     ;; Same goes for the record r. The compiler is smart enough to optimize
     ;; .<prop> into offsets instead of using evidence passing.
-    (println (f"Got: \{ h {}, s {}, l {} \}" (.h r) (.s r) (.l r)))
-    ;;               ^        <->        ^ \{ or \} to escape interpolation.
+    (println (f"Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r)))
+    ;;               ^        <->        ^ {{ or }} to escape interpolation.
     ;; or just:
     (println (ff"Got: { h {{}}, s {{}}, l {{}} }" (.h r) (.s r) (.l r))))
     ;; Any of these work.
@@ -636,15 +636,17 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; custom green-thread schedulers, or delimited control operators like shift/reset.
 ;; Let's reimplement the interate function from the "control" example:
 
-(val iterate : (unit -> unit / < (yield 'a) .. > -> (iterator 'a)))
-(let iterate [action])
+(val iterate : (unit -> unit / < (yield 'a) .. >) -> (iterator 'a))
+(let iterate [action]
   (handle (action ())
     (return _)
       (Done)
     [(yield x) context] ; Raw controls pass their raw context!
-      (Next [x #(resume context ())]))) ; You need to resume WITH the context.
+      (Next [x #((.resume context) ())]))) ; You need to resume WITH the context.
 
-;; Raw controls destruct context so they are strictly one-shot.
+;; Raw controls do not automatically finalize the execution path. You have to take
+;; the responsibility onto yourself i.e. ((.finalize context) ()). Raw controls
+;; can be multi-shot but requires effect group annotation similar to controls. 
 
 ;; Let's take a bit of time to understand the with-expression. Here are some
 ;; cases. First is the case for a scoped resource manager.
@@ -690,29 +692,29 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Instead of bubbling up to a handle, coeffects represent dynamic contexts 
 ;; injected down into the function before it can execute. 
 
-;; Miru tracks coeffect rows using a backslash `\`. Just like effect, coeffects
-;; also support row-polymorphism.
+;; Miru tracks (flat) coeffect rows using a backslash `\`. Just like effect, coeffects
+;; also support row-polymorphism. Miru also implements structural coeffects; we will
+;; even use them together later!
 (val fetch-user-data : string \ < api-key : string, timeout : int .. > -> string)
 (let fetch-user-data [user-id]
-  (let key \api-key) ; \<token> is how you read from a coeffect.
-  ;; You can always use them with (as ...) to help the type system.
-  (let delay (as \timeout int)) ; 'a -> int
-  (format "https://api.example.com/{}?key={}&delay={}" user-id key delay))
+  (let key \api-key) ; \<token> is how you read from a (flat) coeffect.
+  ;; You can always help the type system.
+  (let (delay : int) \timeout) ; 'a -> int
+  (format-to-string (f"https://api.example.com/{}?key={}&delay={}" user-id key delay)))
 
-;; To discharge coeffects, we use a provide begin instead of a handle block.
+;; To discharge coeffects, we use a provide block instead of a handle block.
 (let mock [action]
-  (with (provide { api-key "KEY123", delay 5000 .. }))
-  (with (provide { delay 10000 .. })) ; Shadows the timeout.
+  (with (provide { api-key "KEY123", timeout 5000 .. }))
+  (with (provide { timeout 10000 .. })) ; Shadows the timeout.
   (action ()))
 
 (mock #(fetch-user-data "user_miru"))
 
 ;; It's nice to think it in terms of: you handle effects and provide contexts.
 ;; Effects capture dynamic control flow operations that bubble up the stack,
-;; but are structurally wrong for passive requirements. Coeffects exist to
-;; track the opposite direction: what a function demands down from its
-;; environment before executing. Coeffects are really useful to enable
-;; compile-time safety constraints.
+;; but are structurally wrong for passive requirements. Coeffects (flat) exist
+;; to track the opposite direction: what a function demands down from its
+;; environment before executing.
 
 ;; Miru's procedural macros provide the same expression power as OCaml PPX
 ;; rewriters. Hence, they come with their own set of downsides: fragility,
@@ -759,7 +761,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Let's take this function for e.g.
 (let illegal [quote]
   (let x (lower quote)) ; ERROR! Trying to lower and realize at the same stage is a violation!
-  (lift x))
+  `(x)) ; This is the lift!
 
 (realize (illegal `(+ 1 2)))
 
@@ -832,10 +834,12 @@ $(legal `(+ 1 2))
 (#html ; Macro invocation looks similar to functions but are prepended with a #!
   <html>
     <head>
-      <title>This is a new one!</title>
+      <title>{ "This is a new one!" }</title>
+      ;; Comments are still comments but depends on the implementation!
+      ;; Note, you use { ... } to embed Miru values, which is a good distinction.
     </head>
     <body>
-      <button>This button does nothing so far...</button>
+      <button>{ "This button does nothing so far..." }</button>
     </body>
   </html>)
 
