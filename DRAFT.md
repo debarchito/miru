@@ -732,7 +732,48 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; So tracking properties like linearity, portability, contention, locality etc. are what
 ;; makes structural coeffects very powerful. Miru tracks structural coeffects very similar
 ;; to modaities found in OxCaml (Jane Street's Oxidized OCaml fork). Unlike flat coeffects,
-;; structural coeffects do not make use of row-polymorphism but axis lattices.
+;; structural coeffects do not make use of row-polymorphism but modality lattices.
+
+;; The uniqueness axis: a value is either @unique (exactly one live
+;; reference) or the default, shared.
+(begin
+  (let (x @ { unique }) "hello")
+  (global-aliased-use x) ; x used as aliased i.e. uniqueness is lost.
+  (unique-use x)) ; ERROR: x has already been aliased.
+
+;; To solve this, we introduce borrowing: &<id>
+(begin
+  (let (x @ { unique }) "hello")
+  (global-aliased-use &x) ; Temporarily alias x.
+  (unique-use x)) ; x is still uniquely owned.
+
+;; A borrowed value is aliased so it can't be passed where a unqiue value
+;; is expected. It is also local, because it cannot escape the current
+;; borrow region.
+
+;; The original value is inferred as many for borrow to work i.e.
+(let (x @ { once }) "hello")
+(global-aliased-use &x) ; ERROR: x is once, must be many.
+
+;; The locality axis: @local restricts a value to its enclosing scope,
+;; forbidding it from escaping into a return value, a closure, or a heap
+;; structure.
+(val sum-pairs : (array int) @ { local }
+              -> int)
+(let sum-pairs [pairs]
+  (reduce + 0 pairs)) ; fine: pairs never leaves this scope.
+
+(val leak-pairs : (array int) @ { local }
+               -> (array int)) 
+(let leak-pairs [pairs]
+  pairs) ; ERROR: @local value would escape via the return type.
+
+;; You can always compose the modes e.g. value @ { local unique } and it
+;; implements sub-moding.
+
+;; To avoid the confusion of what "coeffects" mean, flat coeffects (\) are commonly
+;; refered to as ambient contexts or just contexts while structural coeffects (@) are
+;; effectively called modes in Miru.
 
 ;; Miru's procedural macros provide the same expression power as OCaml PPX
 ;; rewriters. Hence, they come with their own set of downsides: fragility,
