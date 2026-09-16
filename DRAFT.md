@@ -36,7 +36,8 @@ type-checking strategies.
 ;; an equivalent of nil as a primitive. Additionally, like most functional
 ;; languages Miru lacks procedures. Every function must return something
 ;; even if it's an unit.
-(val greet : string -> unit)
+(val greet : string
+          -> unit)
 (let greet [name]
   ;; "<>" is a semigroup append function. Since string concatenation forms a
   ;; free semigroup, it behaves the same as String/concat.
@@ -243,7 +244,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Maps are immutable, persistent, purely applicative, unordered (CHAMP),
 ;; homogeneous key-value collections. It's common to use [x y] as a pair.
-(#map [id 1]) ; Borrows the struct body form.
+(#map [id 1])
 ;; or
 (Base/Collections/Map/from-array [| ["id" 1] |])
 
@@ -284,12 +285,14 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; To opt into structural typing, append the row operator `..`.
 ;; This forces the compiler to treat the record as an open, anonymous shape
 ;; instead of binding it to a nominal definition.
-(let s2 { id "MIRU" name "Miru Session" .. })
+(let s2 { id "MIRU", name "Miru Session", .. }) ;; comma are spaces.
 
 ;; This enables a powerful feature called field-level row-polymorphism.
 ;; For example, let's define a function to print the id of a session.
-;; We'll take any record as input that has an "id" field. < ... > are rows.
-(val print-id : < id : string | _ > -> unit)
+;; We'll take any record as input that has an "id" field. { ... } are rows
+;; and yes they track their lineage to records!
+(val print-id : { id : string, .. }
+             -> unit)
 (let print-id [record]
   (println (f"{}" (.id record)))) ; Nominal types can seamlessly fit here.
 
@@ -297,8 +300,9 @@ rff(json)"{"name":"{{value}}"}"(json)
 (print-id s1) ; s1 is nominal.
 (print-id s2) ; s2 is structural.
 
-;; .. is an alias for | _ at the type level; so you could write it as:
-(val print-id : < id : string .. > -> unit) 
+;; ..<id> can be used when the row variable needs a name. r is a unification
+;; variable by default not an abstract type.
+(val print-id : { id : string, ..r } -> unit)
 
 ;; While expressive, structural records come with their own set of performance
 ;; penalties. Nominal records can be represented as a single block of memory with
@@ -313,7 +317,7 @@ rff(json)"{"name":"{{value}}"}"(json)
   { name      : string
     (mut age) : int }) ; "mut" is also a specifier but for fields.
 
-(let p1 { name "John Doe" age 30 })
+(let p1 { name "John Doe", age 30 })
 
 ;; Miru has a single "<-" (mutating) primitive function. All operations are
 ;; data-last.
@@ -322,8 +326,8 @@ rff(json)"{"name":"{{value}}"}"(json)
 (person.age p1) ; 31
 
 ;; We can use this property to build a ref cell around records.
-(type (ref 'a) ; 'a is also known as alpha which is a unification variable.
-  { (mut contents) : 'a })
+(type (ref a) ; a is also an unification variable here.
+  { (mut contents) : a })
 
 ;; We can use ref cells to simulate mutable bindings.
 (let name (ref "Miru"))
@@ -341,19 +345,18 @@ rff(json)"{"name":"{{value}}"}"(json)
 (println (f"{}" !name)) ; Miru
 
 ;; The := function is implemented as follows:
-(val (:=) : 'a -> (ref 'a) -> unit)
+(val (:=) : a
+         -> (ref a)
+         -> unit)
 (let (:=) [value container]
   (<- ref.contents value container))
 
-;; We can also use the type expression to define sum or variant types. '<id> is
-;; reserved for type variables in Miru, not quoting. Infact, Miru only supports
-;; *typed* quasi-quoting using `(...) which evaluate to an (expr 't) data-structure.
-;; More on them later.
+;; We can also use the type expression to define sum or variant types.
 (type shape
-  (Circle < radius : float .. >)) ; Variant constructors must be capitalized.
+  (Circle { radius : float, .. })) ; Variant constructors must be capitalized.
 
-(let [basic-circle { radius 5.0 .. }
-      fancy-circle { radius 10.0 color "red" .. }
+(let [basic-circle { radius 5.0, .. }
+      fancy-circle { radius 10.0, color "red", .. }
       shape-1 (Circle basic-circle)
       shape-2 (Circle fancy-circle)]) ; Both are valid.
 
@@ -424,8 +427,8 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; you would expect them to behave in OCaml. This is also powered using
 ;; row-polymorphism but extended to variants. They are open and can form
 ;; a structural union.
-(type small < :A :B >)
-(type large < :A :B :C (:D string) .. >) ; They can have payloads as usual.
+(type small { :A :B }) ; This is not row polymorphic.
+(type large { :A :B :C (:D string) .. }) ; They can have payloads as usual.
 
 ;; They look a lot like keywords in Clojure but statically typed. Infact,
 ;; they are a drop-in replacement for a lot of cases where you'd
@@ -440,16 +443,16 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 (let (item : small) :A)
 (let (process-large item)) ; ERROR: small is not compatible with large.
-(let (process-large (as item large))) ; This works.
-;; Type coercion is explicit in Miru where "as" is the coercion special form.
+(let (process-large (:> item large))) ; This works.
+;; Type coercion is explicit in Miru where ":>" is the coercion special form.
 
 ;; The colors variant example but with structural variants:
 (type colors
-  < :White
+  { :White
     :Gray
     :Black
     (:RGB [int int int])
-    (:HSL { h int, s int, l int }) >)
+    (:HSL { h int, s int, l int }) })
 
 ;; Let's introduce GADTs. For this example, let's model an expresssion
 ;; evaluator.
@@ -462,11 +465,12 @@ rff(json)"{"name":"{{value}}"}"(json)
   (Is-zero : (exp int)             -> (exp bool)))
 
 ;; (type a) introduces a locally abstract type called "a." They are NOT
-;; type variables. A type variable is a flexible placeholder that can unify
-;; with any type, while a locally abstract type creates a rigid, newly
+;; unification variables. A type variable is a flexible placeholder that can
+;; unify with any type, while a locally abstract type creates a rigid, newly
 ;; minted type identity scoped strictly inside that function. They are what
 ;; enable local type refinement which is crucial to make GADTs work.
-(val eval : (type a) . (exp a) -> a)
+(val eval : (type a) . (exp a)
+         -> a)
 (let (rec eval) [e] ; The "rec" specifier is a property of the binding not type.
   ;; The abstract type "a" is refined in each branch independently.
   (match e
@@ -486,18 +490,19 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; effect operation types: direct operations, one-shot controls, non-resuming
 ;; operations, muli-shot controls and raw controls. The order is intentional.
 
-(effect (state 'a)
+(effect (state a)
   ;; These are examples of direct operations. They are used when you want to
   ;; perform an operation and return a value directly to the perform site while
   ;; having tail-resumption as a guarentee. They can resume exactly once and
   ;; have no access to a continuation because they do not allocate one! They
   ;; are read and typed exactly like normal functions.
-  (val get : unit -> 'a) 
-  (val set : 'a -> unit))
+  (val get : unit -> a) 
+  (val set : a -> unit))
 
 ;; Now, we define a function that performs the state effect. Miru tracks the
 ;; set of effect types as effect rows. They support row-polymorphism.
-(val increment-by : int -> int / < (state int) .. >)
+(val increment-by : int
+                 -> int / { (state int) .. })
 (let increment-by [amount]
   (let current (get ()))
   (set (+ current amount))
@@ -505,16 +510,17 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Now, let's write a handle for the function. It reduces the state effect
 ;; from the row using row variables.
-(val run-state : (int -> int / < (state int) | 'e >) -> int / < 'e >)
+(val run-state : int
+              -> (unit -> int / { (state int) ..e })
+              -> int / e)
 (let run-state [init action]
   (let state (ref init))
 
   ;; with-expressions allow us to eliminate deeply nested code blocks caused
   ;; by trailing closures, etc. More concrete examples will follow soon.
-  (with
-    (handle
-      (get ()) !state
-      (set x)  (:= x state)))
+  (with (handle
+    (get _) !state
+    (set x) (:= x state)))
 
   ;; We can call this function safely.
   (action ()))
@@ -523,42 +529,42 @@ rff(json)"{"name":"{{value}}"}"(json)
 (let res (run-state 10 #(increment-by 5)))
 (println f"{res}") ; 15
 
-;; Control operations capture the delimited continuation `k` at the perform site.
-;; Unlike Koka, control operations default to one-shot resumptions: `k` can be
-;; called at MOST ONCE (0 times to abort, or 1 time to resume).
+;; Control operations capture the delimited continuation at the perform site.
+;; Unlike Koka, control operations default to one-shot resumptions: continuation
+;; can be called at MOST ONCE (0 times to abort, or 1 time to resume).
 
 ;; Lets model interators by modeling the states.
-(type (iterator 'a)
+(type (iterator a)
   (Done)
-  (Next ['a (unit -> (iterator 'a))]))
+  (Next [a (unit -> (iterator a))]))
 
 ;; Now, a control operation to yield values.
-(effect (yield 'a)
-  (control yield : 'a -> unit))
+(effect (yield a)
+  (control yield : a -> unit))
 
-;; Let's define the main iterate function.
-(val iterate : (unit -> unit / < (yield 'a) .. > -> (iterator 'a)))
-(let iterate [action])
-  (handle (action ())
-    (return _)
-      (Done)
-    (yield x)
-      (Next [x #(resume ())])))
+;; Lets define the main iterate function.
+(val iterate : (unit -> unit / { (yield a) ..e })
+            -> (iterator a) / e)
+(let iterate [action]
+  (with (handle
+    (return _) (Done)
+    (yield x)  (Next [x #(resume ())])))
+  (action ()))
 
 ;; And a function that produces some result.
-(val run-print : (iterator int) / < 'e > -> unit / < 'e >)
+;; NOTE: When sending the entire row, you don't need { ..<id> } and can
+;; rather collapse it into an <id>.
+(val run-print : (iterator int) / e
+              -> unit / e)
 (let run-print [iter]
   (match iter
-    (Done)
-      ()
-    (Next [item next])
-      (begin
-        (println f"Yielded: {item}")
-        (run-print (next ())))))
+    (Done) ()
+    (Next [item next]) (begin (println f"Yielded: {item}")
+                              (run-print (next ())))))
 
 ;; Build the iterator.
 (let my-iterator
-  (iter #(
+  (iterate #(begin
     (yield 1)
     (yield 2)
     (yield 3))))
@@ -574,17 +580,19 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; as a non-local jump.
 
 ;; For example, we can model exceptions using final controls.
-(effect (exn 'e)
-  (final throw : 'e -> 'a))
+(effect (exn e)
+  (final throw : e -> a))
 
-(val parse-age : int -> int / < (exn string) .. >)
+(val parse-age : int
+              -> int / { (exn string) })
 (let parse-age [age]
   (if (< age 0)
     (throw "Age cannot be negative")
     age))
 
 ;; A simple example to turn exceptions into options.
-(val run-exn : (unit -> 'a / < (exn string) | 'e >) -> (option 'a) / < 'e >)
+(val run-exn : (unit -> a / { (exn string) ..e })
+            -> (option a) / e)
 (let run-exn [action]
   (with (throw err)
     (println f"Caught error: {err}")
@@ -605,7 +613,8 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Because it performs a multi-shot effect, this branch will evaluate and
 ;; return multiple times during handling.
-(val choices : int -> int / < amb .. >)
+(val choices : int
+            -> int / { amb })
 (let choices [x]
   (if (flip ())
     (+ x 10)
@@ -613,17 +622,12 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Handler for non-deterministic choice using `with`. Aditionally, handles handling any
 ;; effect can use a `return` clause (value clause) to wrap values if needed.
-(val handle-amb : (unit -> 'a / < amb | 'e >) -> (list 'a) / < 'e >)
+(val handle-amb : (unit -> a / { amb ..e })
+               -> (list a) / e)
 (let handle-amb [action]
-  (with
-    (handle
-      ;; Wrap the normal completion result in a list.
-      (return v)
-        :(v)
-
-      (flip ())
-        ;; Combine the results of both forks.
-        (<> (resume true) (resume false))))
+  (with (handle
+    (return v) :(v) ; Wrap the normal completion result in a list.
+    (flip ())  (<> (resume true) (resume false)))) ; Combine the results of both forks.
 
   (action ()))
 
@@ -636,13 +640,18 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; custom green-thread schedulers, or delimited control operators like shift/reset.
 ;; Let's reimplement the interate function from the "control" example:
 
-(val iterate : (unit -> unit / < (yield 'a) .. >) -> (iterator 'a))
+;; Now, a control operation to yield values.
+(effect (yield a)
+  (raw yield : a -> unit))
+
+(val iterate : (unit -> unit / { (yield a) ..e })
+            -> (iterator a) / e)
 (let iterate [action]
-  (handle (action ())
-    (return _)
-      (Done)
-    [(yield x) context] ; Raw controls pass their raw context!
+  (with (handle
+    (return _) (Done)
+    [(yield x) context] ; Raw controls pass their raw context.
       (Next [x #((.resume context) ())]))) ; You need to resume WITH the context.
+  (action ()))
 
 ;; Raw controls do not automatically finalize the execution path. You have to take
 ;; the responsibility onto yourself i.e. ((.finalize context) ()). Raw controls
@@ -685,7 +694,7 @@ rff(json)"{"name":"{{value}}"}"(json)
       (resume ()))
   #(begin
     (emit "1st!")
-    (emit "2nd"))) ;; This will get very tedious with nested handles.
+    (emit "2nd"))) ; This will get very tedious with nested handles.
 
 ;; While algebraic effects track what a computation does downstream (outputs), 
 ;; Miru uses coeffects to track what a computation demands upstream (inputs). 
@@ -695,7 +704,8 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Miru tracks (flat) coeffect rows using a backslash `\`. Just like effect, coeffects
 ;; also support row-polymorphism. Miru also implements structural coeffects; we will
 ;; even use them together later!
-(val fetch-user-data : string \ < api-key : string, timeout : int .. > -> string)
+(val fetch-user-data : string \ { api-key : string, timeout : int, .. }
+                    -> string)
 (let fetch-user-data [user-id]
   (let key \api-key) ; \<token> is how you read from a (flat) coeffect.
   ;; You can always help the type system.
@@ -704,8 +714,8 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; To discharge coeffects, we use a provide block instead of a handle block.
 (let mock [action]
-  (with (provide { api-key "KEY123", timeout 5000 .. }))
-  (with (provide { timeout 10000 .. })) ; Shadows the timeout.
+  (with (provide { api-key "KEY123", timeout 5000, .. }))
+  (with (provide { timeout 10000, .. })) ; Shadows the timeout.
   (action ()))
 
 (mock #(fetch-user-data "user_miru"))
@@ -715,6 +725,14 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; but are structurally wrong for passive requirements. Coeffects (flat) exist
 ;; to track the opposite direction: what a function demands down from its
 ;; environment before executing.
+
+;; A flat coeffect tracks ambient environment requirements as a single, global record
+;; shared across the entire computation, whereas a structural coeffect tracks resource
+;; properties or usage constraints individually for each specific variable in the context.
+;; So tracking properties like linearity, portability, contention, locality etc. are what
+;; makes structural coeffects very powerful. Miru tracks structural coeffects very similar
+;; to modaities found in OxCaml (Jane Street's Oxidized OCaml fork). Unlike flat coeffects,
+;; structural coeffects do not make use of row-polymorphism but axis lattices.
 
 ;; Miru's procedural macros provide the same expression power as OCaml PPX
 ;; rewriters. Hence, they come with their own set of downsides: fragility,
@@ -726,7 +744,9 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; These are just normal Miru functions that modify (expr 'a) just like any
 ;; other data structure.
-(val unroll : int -> (expr int) -> (expr int))
+(val unroll : int
+           -> (expr int)
+           -> (expr int))
 (let (rec unroll) [n x] 
   (match n
     0 `1 ; This is quoting.
@@ -761,7 +781,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Let's take this function for e.g.
 (let illegal [quote]
   (let x (lower quote)) ; ERROR! Trying to lower and realize at the same stage is a violation!
-  `(x)) ; This is the lift!
+  `x) ; This is the lift!
 
 (realize (illegal `(+ 1 2)))
 
