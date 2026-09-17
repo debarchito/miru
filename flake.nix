@@ -67,7 +67,7 @@
 
           # Setup base ocaml tooling.
           ocamlBasePackagesQuery = {
-            ocaml-variants = "5.5.0+options,ocaml-option-flambda";
+            ocaml-variants = "5.5.1+options,ocaml-option-flambda";
             ocaml-config = "*";
             miru = "*";
             miru-repl = "*";
