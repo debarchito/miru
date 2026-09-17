@@ -36,8 +36,7 @@ type-checking strategies.
 ;; an equivalent of nil as a primitive. Additionally, like most functional
 ;; languages Miru lacks procedures. Every function must return something
 ;; even if it's an unit.
-(val greet : string
-          -> unit)
+(val greet : string -> unit)
 (let greet [name]
   ;; "<>" is a semigroup append function. Since string concatenation forms a
   ;; free semigroup, it behaves the same as String/concat.
@@ -46,7 +45,7 @@ type-checking strategies.
   (let msg (<> "Hello, " name))
   (println f"{msg}") ; println MUST take an f-string!
   (println f"I've been greeting a lot today, isn't it {name}?"))
-  ;; Implicit module resolution allow various scope-resolved typeclass-like
+  ;; Implicit record resolution allow various scope-resolved typeclass-like
   ;; features you often find in Rust and Haskell.
 
 ;; Miru has support for raw strings and string tags.
@@ -291,10 +290,12 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; For example, let's define a function to print the id of a session.
 ;; We'll take any record as input that has an "id" field. { ... } are rows
 ;; and yes they track their lineage to records!
-(val print-id : { id : string, .. }
-             -> unit)
+(val print-id : { id : string, .. } -> unit)
 (let print-id [record]
-  (println (f"{}" (.id record)))) ; Nominal types can seamlessly fit here.
+  (println (f"{}" record/id))) ; Nominal types can seamlessly fit here.
+
+;; "record/id" looks very similar to "Module/id" right? Because modules ARE
+;; records! We'll dive into them later.
 
 ;; Both of these work:
 (print-id s1) ; s1 is nominal.
@@ -303,6 +304,10 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; ..<id> can be used when the row variable needs a name. r is a unification
 ;; variable by default not an abstract type.
 (val print-id : { id : string, ..r } -> unit)
+
+;; If the key of a record and a varible is the same, you can use ~<id>.
+(let id "some value")
+(let record { ~id }) ; Identical to { id id } i.e. { id "some value" }
 
 ;; While expressive, structural records come with their own set of performance
 ;; penalties. Nominal records can be represented as a single block of memory with
@@ -320,10 +325,11 @@ rff(json)"{"name":"{{value}}"}"(json)
 (let p1 { name "John Doe", age 30 })
 
 ;; Miru has a single "<-" (mutating) primitive function. All operations are
-;; data-last.
-(<- person.age 31 p1)
+;; data-last because Miru doesn't have thread-first operations, but only
+;; thread last.
+(<- p1/age 31)
 
-(person.age p1) ; 31
+(println (f"{}" p1/age)) ; 31
 
 ;; We can use this property to build a ref cell around records.
 (type (ref a) ; a is also an unification variable here.
@@ -331,11 +337,11 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; We can use ref cells to simulate mutable bindings.
 (let name (ref "Miru"))
-(println (f"{}" (ref.contents name))) ; Miru
+(println (f"{}" name/contents)) ; Miru
 
-(<- ref.contents "MIRU" name)
+(<- "MIRU" name/contents)
 ;; This naturally works.
-(println (f"{}" (.contents name))) ; MIRU
+(println (f"{}" name/contents)) ; MIRU
 
 ;; This is a very useful construct and the Base will provide it by default.
 ;; Mutating and de-referencing is common enough that Miru has a built-in
@@ -345,11 +351,12 @@ rff(json)"{"name":"{{value}}"}"(json)
 (println (f"{}" !name)) ; Miru
 
 ;; The := function is implemented as follows:
-(val (:=) : a
-         -> (ref a)
-         -> unit)
+(val (:=) : a -> (ref a) -> unit)
 (let (:=) [value container]
-  (<- ref.contents value container))
+  (<- value container/contents))
+
+;; It's a very light wrapper. := is a visual indicator that you are working with
+;; refcells which make it easy to code.
 
 ;; We can also use the type expression to define sum or variant types.
 (type shape
@@ -382,16 +389,13 @@ rff(json)"{"name":"{{value}}"}"(json)
     (println f"Got constructors with no payload!")
 
   (RGB t)
-    ;; The tuple t is refined in this scope, so we can use .<prop> syntax.
-    (println (f"Got: {} * {} * {}" (.0 t) (.1 t) (.2 t)))
+    (println (f"Got: {} * {} * {}" t/0 t/1 t/2))
 
   (HSL r)
-    ;; Same goes for the record r. The compiler is smart enough to optimize
-    ;; .<prop> into offsets instead of using evidence passing.
-    (println (f"Got: {{ h {}, s {}, l {} }}" (.h r) (.s r) (.l r)))
+    (println (f"Got: {{ h {}, s {}, l {} }}" r/h r/s r/l))
     ;;               ^        <->        ^ {{ or }} to escape interpolation.
     ;; or just:
-    (println (ff"Got: { h {{}}, s {{}}, l {{}} }" (.h r) (.s r) (.l r))))
+    (println (ff"Got: { h {{}}, s {{}}, l {{}} }" r/h r/s r/l)))
     ;; Any of these work.
   
 ;; We use the "alias" specifier to create type aliases.
@@ -410,10 +414,10 @@ rff(json)"{"name":"{{value}}"}"(json)
   (If-then-else    [expression statement statement])
   (Void-expression expression)))
 
-;; Let's build a tree for an example.
-(type (tree 'a)
+;; Lets build a tree for an example.
+(type (tree a)
   Empty
-  (Node [(tree 'a) 'a (tree 'a)]))
+  (Node [(tree a) a (tree a)]))
 
 ;; And use it:
 (let example-tree
@@ -469,8 +473,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; unify with any type, while a locally abstract type creates a rigid, newly
 ;; minted type identity scoped strictly inside that function. They are what
 ;; enable local type refinement which is crucial to make GADTs work.
-(val eval : (type a) . (exp a)
-         -> a)
+(val eval : (type a) . (exp a) -> a)
 (let (rec eval) [e] ; The "rec" specifier is a property of the binding not type.
   ;; The abstract type "a" is refined in each branch independently.
   (match e
@@ -501,8 +504,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Now, we define a function that performs the state effect. Miru tracks the
 ;; set of effect types as effect rows. They support row-polymorphism.
-(val increment-by : int
-                 -> int / { (state int) .. })
+(val increment-by : int -> int / { (state int) .. })
 (let increment-by [amount]
   (let current (get ()))
   (set (+ current amount))
@@ -510,9 +512,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Now, let's write a handle for the function. It reduces the state effect
 ;; from the row using row variables.
-(val run-state : int
-              -> (unit -> int / { (state int) ..e })
-              -> int / e)
+(val run-state : int -> (unit -> int / { (state int) ..e }) -> int / e)
 (let run-state [init action]
   (let state (ref init))
 
@@ -543,8 +543,7 @@ rff(json)"{"name":"{{value}}"}"(json)
   (control yield : a -> unit))
 
 ;; Lets define the main iterate function.
-(val iterate : (unit -> unit / { (yield a) ..e })
-            -> (iterator a) / e)
+(val iterate : (unit -> unit / { (yield a) ..e }) -> (iterator a) / e)
 (let iterate [action]
   (with (handle
     (return _) (Done)
@@ -554,8 +553,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; And a function that produces some result.
 ;; NOTE: When sending the entire row, you don't need { ..<id> } and can
 ;; rather collapse it into an <id>.
-(val run-print : (iterator int) / e
-              -> unit / e)
+(val run-print : (iterator int) / e -> unit / e)
 (let run-print [iter]
   (match iter
     (Done) ()
@@ -583,16 +581,14 @@ rff(json)"{"name":"{{value}}"}"(json)
 (effect (exn e)
   (final throw : e -> a))
 
-(val parse-age : int
-              -> int / { (exn string) })
+(val parse-age : int -> int / { (exn string) })
 (let parse-age [age]
   (if (< age 0)
     (throw "Age cannot be negative")
     age))
 
 ;; A simple example to turn exceptions into options.
-(val run-exn : (unit -> a / { (exn string) ..e })
-            -> (option a) / e)
+(val run-exn : (unit -> a / { (exn string) ..e }) -> (option a) / e)
 (let run-exn [action]
   (with (throw err)
     (println f"Caught error: {err}")
@@ -613,8 +609,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Because it performs a multi-shot effect, this branch will evaluate and
 ;; return multiple times during handling.
-(val choices : int
-            -> int / { amb })
+(val choices : int -> int / { amb })
 (let choices [x]
   (if (flip ())
     (+ x 10)
@@ -622,8 +617,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Handler for non-deterministic choice using `with`. Aditionally, handles handling any
 ;; effect can use a `return` clause (value clause) to wrap values if needed.
-(val handle-amb : (unit -> a / { amb ..e })
-               -> (list a) / e)
+(val handle-amb : (unit -> a / { amb ..e }) -> (list a) / e)
 (let handle-amb [action]
   (with (handle
     (return v) :(v) ; Wrap the normal completion result in a list.
@@ -650,7 +644,7 @@ rff(json)"{"name":"{{value}}"}"(json)
   (with (handle
     (return _) (Done)
     [(yield x) context] ; Raw controls pass their raw context.
-      (Next [x #((.resume context) ())]))) ; You need to resume WITH the context.
+      (Next [x #(context/resume ())]))) ; You need to resume FROM the context.
   (action ()))
 
 ;; Raw controls do not automatically finalize the execution path. You have to take
@@ -696,35 +690,104 @@ rff(json)"{"name":"{{value}}"}"(json)
     (emit "1st!")
     (emit "2nd"))) ; This will get very tedious with nested handles.
 
-;; While algebraic effects track what a computation does downstream (outputs), 
-;; Miru uses coeffects to track what a computation demands upstream (inputs). 
-;; Instead of bubbling up to a handle, coeffects represent dynamic contexts 
-;; injected down into the function before it can execute. 
+;; Miru implement two forms of coeffects: flat (contexts) and structural (modes).
+;; A flat coeffect tracks ambient environment requirements as a single, global record
+;; shared across the entire computation, whereas a structural coeffect tracks resource
+;; properties or usage constraints individually for each specific variable in the context.
+;; So tracking properties like linearity, portability, contention, locality etc. are what
+;; makes structural coeffects very powerful. Miru tracks structural coeffects very similar
+;; to modaities found in OxCaml (Jane Street's Oxidized OCaml fork). Unlike flat coeffects,
+;; structural coeffects do not make use of row-polymorphism but modality lattices.
 
-;; Miru tracks (flat) coeffect rows using a backslash `\`. Just like effect, coeffects
-;; also support row-polymorphism. Miru also implements structural coeffects; we will
-;; even use them together later!
-(val fetch-user-data : string \ { api-key : string, timeout : int, .. }
-                    -> string)
-(let fetch-user-data [user-id]
-  (let key \api-key) ; \<token> is how you read from a (flat) coeffect.
-  ;; You can always help the type system.
-  (let (delay : int) \timeout) ; 'a -> int
-  (format-to-string (f"https://api.example.com/{}?key={}&delay={}" user-id key delay)))
+;; Contexts are intertwined with the "module" system which in turn surface as modular implicits
+;; and explicits. Let's look at an example by defining a "module" type.
 
-;; To discharge coeffects, we use a provide block instead of a handle block.
-(let mock [action]
-  (with (provide { api-key "KEY123", timeout 5000, .. }))
-  (with (provide { timeout 10000, .. })) ; Shadows the timeout.
-  (action ()))
+;; Module types are record types. By convention, they are always in UPPERCASE.
+(type ORD
+  { (type t) . ; You can define abstract types here and use them in the record body.
+    compare : t -> t -> int, .. }) ; They need to be structural to enable subtyping.
 
-(mock #(fetch-user-data "user_miru"))
+;; Let's write a storing function.
+(val sort-generic : (type t) . (t -> t -> bool) -> (list t) -> (list t))
+(let sort-generic [compare lst]
+  (let (rec insert) [x xs]
+    (match xs
+      :()       :(x)
+      (:: y ys) (if (compare x y)
+                  (:: x (:: y ys))
+                  (:: y (insert x ys)))))
+  (foldr insert :() lst))
 
-;; It's nice to think it in terms of: you handle effects and provide contexts.
-;; Effects capture dynamic control flow operations that bubble up the stack,
-;; but are structurally wrong for passive requirements. Coeffects (flat) exist
-;; to track the opposite direction: what a function demands down from its
-;; environment before executing.
+;; Functors are just normal functions. Notice the sorting interface is stuctural.
+;; But you could make it a seperate type too. By conventions, modules and functors
+;; are Header-cased.
+(val Make-sorter : ORD -> { (type t) . sort : (list t) -> (list t), .. })
+(let Make-sorter [M]
+  { (type t = M/t) .
+    sort #(sort-generic M/compare %), .. })
+
+;; Let's create our "modules".
+(let Int-asc { (type t = int) .
+               compare #(<= %1 %2) })
+
+(let Int-desc { (type t = int) .
+               compare #(>= %1 %2) })
+
+;; And now, we can use the functor.
+(let Int-asc-sorter (Make-sorter Int-asc))
+(let Int-desc-sorter (Make-sorter Int-desc))
+
+;; We define a type the context needs to supply.
+(type SHOW
+  { (type t) .
+    show : t -> string, .. })
+
+;; Miru tracks contexts using a backslash `\`. Just like effect, contexts
+;; support row-polymorphism. We provide a name to the context payload
+;; (which is a module in this case) using <~.
+(val print-blank : S/t \ { S <~ SHOW .. } -> unit)
+(let print-blank [x]
+  (let S \S) ; \<id> is how you read from the context row.
+  (println (f"{}" (S/show x))))
+
+;; You could also write the signature as:
+(val print-blank : (type a) . a \ { S <~ (SHOW ~> (type t = a)) .. } -> unit)
+;; <~ is formally called a flat binding while ~> is called a structural binding.
+
+;; Let's implement a module for integers first.
+(let Show-int { (type t = int) .
+                show #(Int/to-string %) })
+
+;; And another for lists, using a functor.
+(val Show-list : SHOW -> SHOW)
+(let Show-list [S]
+  { (type t = (list S/t)) .
+    show #(format-to-string (f"list({})" (join " " (map S/show %)))) })
+
+;; This is how you would provide them when named:
+(with (provide { S <~ Show-int }))
+(print-blank 4) ; 4
+
+(with (provide { S <~ (Show-list Show-int) }))
+(print-blank :(1 2 3)) ; list(1 2 3)
+
+;; You can actually skip the name too, and it will try to resolve using
+;; type-direction!
+(with (provide { (Show-list Show-int) }))
+(print-blank :(1 2 3)) ; list(1 2 3)
+
+;; Named contexts are useful when you have numerous contexts of the same type in demand.
+;; Miru prefers explicit resolution but that doesn't mean implicit resolution is not
+;; supported. Use them wisely and partly for trivial purposes.
+
+;; Mark the type as implicit.
+(val print-blank : S/t \ { S <~ (implicit SHOW) .. } -> unit)
+(let print-blank [x]
+  (println (f"{}" (\S/show x)))) ; You can also use \<id> directly.
+
+;; Now, the compiler will perform scope resolution for you.
+(print-blank 4) ; 4
+(print-blank :(1 2 3)) ; list(1 2 3)
 
 ;; A flat coeffect tracks ambient environment requirements as a single, global record
 ;; shared across the entire computation, whereas a structural coeffect tracks resource
@@ -758,13 +821,11 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; The locality axis: @local restricts a value to its enclosing scope,
 ;; forbidding it from escaping into a return value, a closure, or a heap
 ;; structure.
-(val sum-pairs : (array int) @ { local }
-              -> int)
+(val sum-pairs : (array int) @ { local } -> int)
 (let sum-pairs [pairs]
   (reduce + 0 pairs)) ; fine: pairs never leaves this scope.
 
-(val leak-pairs : (array int) @ { local }
-               -> (array int)) 
+(val leak-pairs : (array int) @ { local } -> (array int)) 
 (let leak-pairs [pairs]
   pairs) ; ERROR: @local value would escape via the return type.
 
@@ -785,9 +846,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; These are just normal Miru functions that modify (expr 'a) just like any
 ;; other data structure.
-(val unroll : int
-           -> (expr int)
-           -> (expr int))
+(val unroll : int -> (expr int) -> (expr int))
 (let (rec unroll) [n x] 
   (match n
     0 `1 ; This is quoting.
