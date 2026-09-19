@@ -449,6 +449,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 (let (process-large item)) ; ERROR: small is not compatible with large.
 (let (process-large (:> item large))) ; This works.
 ;; Type coercion is explicit in Miru where ":>" is the coercion special form.
+;; (as ...) is an alias of (:> ...).
 
 ;; The colors variant example but with structural variants:
 (type colors
@@ -482,6 +483,10 @@ rff(json)"{"name":"{{value}}"}"(json)
     (Add [x y]) (+ (eval x) (eval y))
     (Is-zero x) (= (eval x) 0)))
 
+;; Now, we can introduce keyword aliases. Some forms in the type spec can be written
+;; more naturally if you want to:
+(val eval : (type a) in (exp a) -> a) ; Makes it easy to read!
+
 (let safe-exp (Add (Int 5) (Int 10)))
 (eval safe-exp) ; 15
 
@@ -504,15 +509,18 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Now, we define a function that performs the state effect. Miru tracks the
 ;; set of effect types as effect rows. They support row-polymorphism.
-(val increment-by : int -> int / { (state int) .. })
+(val increment-by : int -> int ! { (state int) .. })
 (let increment-by [amount]
   (let current (get ()))
   (set (+ current amount))
   (get ()))
 
+;; "!" has a keyword alias too in case you like this better.
+(val increment-by : int -> int performs { (state int) .. })
+
 ;; Now, let's write a handle for the function. It reduces the state effect
 ;; from the row using row variables.
-(val run-state : int -> (unit -> int / { (state int) ..e }) -> int / e)
+(val run-state : int -> (unit -> int ! { (state int) ..e }) -> int ! e)
 (let run-state [init action]
   (let state (ref init))
 
@@ -543,7 +551,7 @@ rff(json)"{"name":"{{value}}"}"(json)
   (control yield : a -> unit))
 
 ;; Lets define the main iterate function.
-(val iterate : (unit -> unit / { (yield a) ..e }) -> (iterator a) / e)
+(val iterate : (unit -> unit ! { (yield a) ..e }) -> (iterator a) ! e)
 (let iterate [action]
   (with (handle
     (return _) (Done)
@@ -553,7 +561,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; And a function that produces some result.
 ;; NOTE: When sending the entire row, you don't need { ..<id> } and can
 ;; rather collapse it into an <id>.
-(val run-print : (iterator int) / e -> unit / e)
+(val run-print : (iterator int) ! e -> unit ! e)
 (let run-print [iter]
   (match iter
     (Done) ()
@@ -581,14 +589,14 @@ rff(json)"{"name":"{{value}}"}"(json)
 (effect (exn e)
   (final throw : e -> a))
 
-(val parse-age : int -> int / { (exn string) })
+(val parse-age : int -> int ! { (exn string) })
 (let parse-age [age]
   (if (< age 0)
     (throw "Age cannot be negative")
     age))
 
 ;; A simple example to turn exceptions into options.
-(val run-exn : (unit -> a / { (exn string) ..e }) -> (option a) / e)
+(val run-exn : (unit -> a ! { (exn string) ..e }) -> (option a) ! e)
 (let run-exn [action]
   (with (throw err)
     (println f"Caught error: {err}")
@@ -609,7 +617,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Because it performs a multi-shot effect, this branch will evaluate and
 ;; return multiple times during handling.
-(val choices : int -> int / { amb })
+(val choices : int -> int ! { amb })
 (let choices [x]
   (if (flip ())
     (+ x 10)
@@ -617,7 +625,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 
 ;; Handler for non-deterministic choice using `with`. Aditionally, handles handling any
 ;; effect can use a `return` clause (value clause) to wrap values if needed.
-(val handle-amb : (unit -> a / { amb ..e }) -> (list a) / e)
+(val handle-amb : (unit -> a ! { amb ..e }) -> (list a) ! e)
 (let handle-amb [action]
   (with (handle
     (return v) :(v) ; Wrap the normal completion result in a list.
@@ -638,8 +646,8 @@ rff(json)"{"name":"{{value}}"}"(json)
 (effect (yield a)
   (raw yield : a -> unit))
 
-(val iterate : (unit -> unit / { (yield a) ..e })
-            -> (iterator a) / e)
+(val iterate : (unit -> unit ! { (yield a) ..e })
+            -> (iterator a)  ! e)
 (let iterate [action]
   (with (handle
     (return _) (Done)
@@ -742,20 +750,31 @@ rff(json)"{"name":"{{value}}"}"(json)
   { (type t) .
     show : t -> string, .. })
 
-;; Miru tracks contexts using a backslash `\`. Just like effect, contexts
+;; Miru tracks contexts using a question `?`. Just like effect, contexts
 ;; support row-polymorphism. We provide a name to the context payload
 ;; (which is a module in this case) using <~.
-(val print-blank : S/t \ { S <~ SHOW .. } -> unit)
+(val print-blank : S/t ? { S <~ SHOW .. } -> unit)
 (let print-blank [x]
-  (let S \S) ; \<id> is how you read from the context row.
+  (let S ?S) ; ?<id> is how you read from the context row.
   (println (f"{}" (S/show x))))
 
 ;; You could also write the signature as:
-(val print-blank : (type a) . a \ { S <~ (SHOW ~> (type t = a)) .. } -> unit)
+(val print-blank : (type a) .
+                   a ? { S <~ (SHOW ~> (type t = a)) .. } -> unit)
 ;; <~ is formally called a flat binding while ~> is called a structural binding.
+
+;; Similar to effects, coeffects also have keyword aliases.
+(val print-blank : (type a) in
+                   a demands { S as (SHOW with (type t = a)) .. } -> unit)
+;; To note, these keyword aliases are no way related to the (<keyword> ...)
+;; forms if any.
 
 ;; Let's implement a module for integers first.
 (let Show-int { (type t = int) .
+                show #(Int/to-string %) })
+
+;; It naturally can also be written as:
+(let Show-int { (type t = int) in
                 show #(Int/to-string %) })
 
 ;; And another for lists, using a functor.
@@ -781,9 +800,9 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; supported. Use them wisely and partly for trivial purposes.
 
 ;; Mark the type as implicit.
-(val print-blank : S/t \ { S <~ (implicit SHOW) .. } -> unit)
+(val print-blank : S/t ? { S <~ (implicit SHOW) .. } -> unit)
 (let print-blank [x]
-  (println (f"{}" (\S/show x)))) ; You can also use \<id> directly.
+  (println (f"{}" (?S/show x)))) ; You can also use ?<id> directly.
 
 ;; Now, the compiler will perform scope resolution for you.
 (print-blank 4) ; 4
@@ -832,7 +851,10 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; You can always compose the modes e.g. value @ { local unique } and it
 ;; implements sub-moding.
 
-;; To avoid the confusion of what "coeffects" mean, flat coeffects (\) are commonly
+;; Moding also has an keyword alias.
+(val leak-pairs : (array int) is { local } -> (array int)) 
+
+;; To avoid the confusion of what "coeffects" mean, flat coeffects (?) are commonly
 ;; refered to as ambient contexts or just contexts while structural coeffects (@) are
 ;; effectively called modes in Miru.
 
@@ -844,7 +866,7 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; to implement expression values, and the two basic constructs to build them:
 ;; quoting and splicing.
 
-;; These are just normal Miru functions that modify (expr 'a) just like any
+;; These are just normal Miru functions that modify (expr a) just like any
 ;; other data structure.
 (val unroll : int -> (expr int) -> (expr int))
 (let (rec unroll) [n x] 
@@ -856,8 +878,8 @@ rff(json)"{"name":"{{value}}"}"(json)
 ;; Miru implements multi-stage programming (MSP) such that quotes increment the stage while
 ;; splices decrement the stage; `(...) and $(...) are syntactic and are intertwined
 ;; with each other. There are two phasing bridges: (lift <x>) turns a stage-x value
-;; into a stage-(x + 1) value i.e. 'a -> (expr 'a) while (lower <x>) evalues a stage-(x + 1)
-;; value to produce a stage-x value i.e. (expr 'a) -> 'a.
+;; into a stage-(x + 1) value i.e. a -> (expr a) while (lower <x>) evalues a stage-(x + 1)
+;; value to produce a stage-x value i.e. (expr a) -> a.
 
 ;; `unroll` returns a value of type (expr int) thus, making it stage-1.
 (let value (lower (unroll 4 `3))) ; `lower` drops it to stage-0 by evaluating it.
@@ -903,9 +925,9 @@ $(legal `(+ 1 2))
 ;; you can prove that an index never leaves the array's bounds at compile-time!
 
 ;; Parameterizing length directly in the array type:
-(val get-at : (arr : (array 'a))
+(val get-at : (arr : (array a))
            -> (i   : int | (&& (>= i 0) (< i (Array/length arr))))
-           -> 'a)
+           -> a)
 ;; Refinement uses the pipe (|) operator.
 ;; (Array/length arr) here works as a reflected measure! More on measures and
 ;; reflected functions later.
@@ -921,9 +943,14 @@ $(legal `(+ 1 2))
   (&& (>= i 0) (< i (Array/length arr))))
 
 ;; And use it in the predicate position:
-(val get-at : (arr : (array 'a))
+(val get-at : (arr : (array a))
            -> (i   : int | (in-bounds i arr))
-           -> 'a)
+           -> a)
+
+;; Additionally, there is a keyword alias too.
+(val get-at : (arr : (array a))
+           -> (i   : int where (in-bounds i arr))
+           -> a)
 
 ;; Contract-based specification literature often uses terms like "requires" to define
 ;; pre-conditions, "modifies" to track the set of plausibly mutable values, and "ensures"
