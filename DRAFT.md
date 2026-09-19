@@ -745,6 +745,21 @@ rff(json)"{"name":"{{value}}"}"(json)
 (let Int-asc-sorter (Make-sorter Int-asc))
 (let Int-desc-sorter (Make-sorter Int-desc))
 
+;; Functors are applicative by default similar to OCaml. Thus Miru also inherits
+;; OCaml's convention of using unit to define generative functors syntactically.
+;; This is less about sementic clarity and more about a pragmatic middle ground.
+(val Make-sorter-gen : ORD -> unit -> { (type t) . sort : (list t) -> (list t), .. })
+(let Make-sorter-gen [M ()]
+  { (type t = M/t) .
+    sort #(sort-generic M/compare %), .. })
+
+;; Now, we can use our new functor. Unlike OCaml, Miru doesn't force you to curry
+;; the unit call because functors are normal functions. The type t is minted uniquely
+;; for each call making them different hence generative.
+(let Int-asc-sorter-gen (Make-sorter-gen Int-asc)) ; Curried!
+(let One (Int-asc-sorter-gen ()))
+(let Two (Int-asc-sorter-gen ())) ; One and Two are not equivalent.
+
 ;; We define a type the context needs to supply.
 (type SHOW
   { (type t) .
