@@ -37,7 +37,9 @@ To note, reader macros in Miru are not user extensible. Extensible reader macros
 are an evergreen minefield of broken tooling that Miru aims to avoid. We'll look
 into alternatives down the line.
 
-### 2. Introduction to bindings
+### 2. Within Bindings
+
+#### 2.1. The `let`-form
 
 All bindings use the `let`-form; this includes named bindings (having arity = 0)
 and function bindings (having arity >= 1). Bindings are immutable but
@@ -59,6 +61,8 @@ and `concat` is a function with arity = 2 defined inside the `String` module.
 Note that all bindings and types in Miru follow the kebab-case convention; the
 only exceptions include modules and type constructors which use
 Header-kebab-case.
+
+#### 2.2. Type annotations
 
 The type of the `greet` function is inferred as `string -> string`. We can also
 use the `val`-form to define the type of a binding ourselves.
@@ -83,6 +87,47 @@ ourselves.
            ; this scope. No return keyword required.
 ```
 
+We can annotate expressions with concrete types in-line using
+`(<expr> : <type>)`. This also extends to universal quantifiers (e.g.
+`(<expr> : forall a. <type>)`) and abstract types (e.g.
+`(<expr> : type a. <type>)`). But, effects, contexts, modalities and refinement
+types cannot be expressed inline. In such cases, opt for `val`-form. We'll
+discuss them more in later chapters.
+
+```clojure
+(let multiply [(a : int) (b : int)] ; We can annotate the arguments.
+  ((* a b) : int)) ; We can annotate any expression.
+```
+
+Bindings do not have an explicit return type marker for inline annotations.
+Instead, we annotate the final returning expression directly.
+
+#### 2.3. Sequential scopes and parallel bindings
+
+We can use the `begin`-form to introduce a new top-down sequential scope. The
+`let`-form is also sequential but it requires an existing scope to bind to,
+similar to `let ... in ...` in OCaml.
+
+```clojure
+(begin
+  (let x 10)
+  (let y 11)
+  (+ x y)) ; 21
+```
+
+Parallel bindings can be introduced using product unpacking. Miru only allows us
+to unpack product types (tuples and records) within the `let`-form because they
+can be exhaustively unpacked using a single pattern. This doesn't hold for sum
+types or arbitrary data structures like lists or arrays; the `match`-form is a
+strictly better fit for those cases.
+
+```clojure
+(let [a b] [1.0 "Hello, World!"]) ; `a` and `b` are unaware of each other
+                                  ; because unpacking is parallel by nature.
+```
+
+#### 2.4. Currying
+
 Functions are first-class values and curried automatically.
 
 ```clojure
@@ -91,92 +136,15 @@ Functions are first-class values and curried automatically.
 (multiply-by-5 10) ; 50
 ```
 
-### 3. Strings and their forms
-
-Before we starting printing values, we need to explore strings and their forms.
-
-We start with standard strings and the ability to tag them. Tagged strings are
-very useful when we want to avoid constant escaping. In this example, `(tag)"`
-always closes with `"(tag)` rather han `"`. We can name tags just like bindings.
+Currying makes composition clean and natural. In this example, `:(...)` are
+linked lists. We'll cover them later. `(* 2)` wraps a lambda that expects a
+second argument.
 
 ```clojure
-;; Good ol' strings.
-(let a "I'm a normal string")
-(let b (tag)"I'm a tagged string"(tag))
+(let new-list (map (* 2) :(1 2 3 4))) ; :(2 4 6 8)
 ```
 
-Raw strings are also fully supported.
-
-```clojure
-(let c r"I'm a raw string\n") ; Raw strings do not evaluate escape sequences.
-(let c r(tag)"I can also be tagged!"(tag)) ; Naturally, they can be tagged
-                                           ; as well.
-```
-
-Format strings are special in that they aren't actually strings at all. They
-allow interpolation and are desugared into GADT (Generalized Algebraic Data
-Types) constructors, much like in OCaml. They retain the "string" designation
-purely for convenience and similarity, though calling them formal constructors
-is more precise. By default, interpolation uses `{...}` and lets us embed named
-bindings directly. However, much like in Rust, it does not support embedding
-arbitrary expressions.
-
-```clojure
-(let d "interpolate")
-(let d f"I can {d} values!") ; I can interpolate values!
-```
-
-Alternatively, we can use the constructor form. Note that we cannot mix the
-literal and constructor forms together. We will dive deeper into GADTs and ADTs
-later.
-
-```clojure
-(let d (f"I can {} values!" d))
-```
-
-Format constructors also support chaining, which alter the interpolation
-semantics accordingly.
-
-```clojure
-(let d (ff"I can {{}} values!" d)) ; `ff` shifts the interpolation target
-                                   ; from {...} to {{...}}.
-```
-
-The rule of thumb follows a predictable pattern: `f -> {...}`, `ff -> {{...}}`,
-`fff -> {{{...}}}`, or more generally, `f_n -> {_n ... }_n`.
-
-Raw format constructors are available and support chaining as well.
-
-```clojure
-(let d (rff"I can {{}} values and raw literals like \n" d))
-```
-
-### 4. Printing with format constructors
-
-Now, we've everything required to start printing values. Let's reimplement the
-`greet` function to print the value directly rather than returning a string.
-
-Functions must always return a value. If there is no meaningful value to return,
-we return unit instead.
-
-```clojure
-(val greet : string -> unit)
-(let greet [name]
-  ;; "<>" is a semigroup append function. Since string concatenation forms a
-  ;; free semigroup, it behaves the same as `String/concat`.
-  (println (f"{}" (<> "Hello, " name))))
-```
-
-`println` always expects a format constructor; we can't pass a standard string
-as its argument directly. To convert format strings into plain strings, we can
-use the `String/from-format` function.
-
-```clojure
-(let to-embed "World")
-(String/from-format f"Hello, {to-embed}!") ; Hello, World!
-```
-
-### 5. More on function bindings
+#### 2.5. Recursion
 
 Recursive functions need to be marked with a `rec` specifier. Specifiers are
 special positional properties attached to names.
@@ -203,6 +171,8 @@ We can extend this naturally to mutually recursive functions.
     n (is-even? (- n 1))))
 ```
 
+#### 2.6. Functions and side effects
+
 As stated before, function bindings must have arity >= 1. Some functions
 naturally don't take any arguments, so we use the `unit` type for the first
 argument, effectively calling the function only for its side effects.
@@ -220,19 +190,15 @@ argument, effectively calling the function only for its side effects.
 ; ^^^^^^^^^^^^^ Syntax Error
 ```
 
+#### 2.7. Name aliasing
+
 If we want to alias a function, we do:
 
 ```clojure
 (let aliased-hello-world hello-world)
 ```
 
-Currying makes composition clean and natural. In this example, `:(...)` are
-linked lists. We'll cover them later. `(* 2)` wraps a lambda that expects a
-second argument.
-
-```clojure
-(let new-list (map (* 2) :(1 2 3 4))) ; :(2 4 6 8)
-```
+#### 2.8. Lambdas
 
 We can always define functions using lambdas and named bindings.
 
@@ -244,6 +210,8 @@ We can always define functions using lambdas and named bindings.
 (square 6) ; 36
 ```
 
+#### 2.9. Symbolic functions
+
 Symbolic functions are valid too, although they must be defined inside `(...)`.
 
 ```clojure
@@ -251,44 +219,132 @@ Symbolic functions are valid too, although they must be defined inside `(...)`.
 (~/ 4.0) ; 0.25
 ```
 
-### 6. Sequential scopes and parallel bindings
+#### 2.10. Infixing arity-2 functions
 
-We can use the `begin`-form to introduce a new top-down sequential scope. The
-`let`-form is also sequential but it requires an existing scope to bind to,
-similar to `let ... in ...` in OCaml.
-
-```clojure
-(begin
-  (let x 10)
-  (let y 11)
-  (+ x y)) ; 21
-```
-
-Parallel bindings can be introduced using product unpacking. Miru only allows us
-to unpack product types (tuples and records) within the `let`-form because they
-can be exhaustively unpacked using a single pattern. This doesn't hold for sum
-types or arbitrary data structures like lists or arrays; the `match`-form is a
-strictly better fit for those cases.
+In Miru, all expressions natively evaluate using prefix notation
+`(<fun> <x> <y> ...)`. To write complex mathematical chains or linear data flows
+without deep parenthesis nesting, we can lift any arity-2 function into an infix
+expression using `#ltr <form>` (left-to-right associative) and `#rtl <form>`
+(right-to-left associative).
 
 ```clojure
-(let [a b] [1.0 "Hello, World!"]) ; `a` and `b` are unaware of each other
-                                  ; because unpacking is parallel by nature.
+(+ 1 (+ 2 (+ 3 4)))
+;; can also be written as:
+#rtl (1 + 2 + 3 + 4)
 ```
 
-### 7. Data structures
-
-#### 7.1. Tuples
-
-Tuples are immutable, fixed-sized collections of heterogeneous elements. Tuples
-are structural product types. We can use the same inspection operator `/` to
-access the fields of a tuple.
+Alternatively,
 
 ```clojure
-(let tup [1, 2.0 "Hello World"]) ; Commas are treated the same as whitespace.
-(println (f"{}" tup/1)) ; 2.0
+(- (- 7 3) 4)
+;; can be written as:
+#ltr (7 - 3 - 4)
 ```
 
-#### 7.2. Lists
+This also generalizes to custom functions naturally. Let's reuse the `multiply`
+function we defined earlier.
+
+```clojure
+#ltr (10 multiply 78)
+```
+
+Like the `#_` discard reader, these readers intercept the forms that immediately
+follows at parse time before type checking occurs.
+
+### 3. Within strings
+
+#### 3.1. Standard strings
+
+Before we starting printing values, we need to explore strings and their forms.
+
+We start with standard strings and the ability to tag them. Tagged strings are
+very useful when we want to avoid constant escaping. In this example, `(tag)"`
+always closes with `"(tag)` rather han `"`. We can name tags just like bindings.
+
+```clojure
+;; Good ol' strings.
+(let a "I'm a normal string")
+(let b (tag)"I'm a tagged string"(tag))
+```
+
+#### 3.2. Raw strings
+
+Raw strings are also fully supported.
+
+```clojure
+(let c r"I'm a raw string\n") ; Raw strings do not evaluate escape sequences.
+(let c r(tag)"I can also be tagged!"(tag)) ; Naturally, they can be tagged
+                                           ; as well.
+```
+
+#### 3.3. Format strings/constructors
+
+Format strings are special in that they aren't actually strings at all. They
+allow interpolation and are desugared into generalized variant constructors,
+much like in OCaml. They retain the "string" designation purely for convenience
+and similarity, though calling them formal constructors is more precise. By
+default, interpolation uses `{...}` and lets us embed named bindings directly.
+However, much like in Rust, it does not support embedding arbitrary expressions.
+
+```clojure
+(let d "interpolate")
+(let d f"I can {d} values!") ; I can interpolate values!
+```
+
+Alternatively, we can use the constructor form. Note that we cannot mix the
+literal and constructor forms together. We will dive deeper into GADTs and ADTs
+later.
+
+```clojure
+(let d (f"I can {} values!" d))
+```
+
+#### 3.4. Chaining and interpolation
+
+Format constructors also support chaining, which alter the interpolation
+semantics accordingly.
+
+```clojure
+(let d (ff"I can {{}} values!" d)) ; `ff` shifts the interpolation target
+                                   ; from {...} to {{...}}.
+```
+
+The rule of thumb follows a predictable pattern: `f -> {...}`, `ff -> {{...}}`,
+`fff -> {{{...}}}`, or more generally, `f_n -> {_n ... }_n`.
+
+Raw format constructors are available and support chaining as well.
+
+```clojure
+(let d (rff"I can {{}} values and raw literals like \n" d))
+```
+
+#### 3.5. Printing with format constructors
+
+Now, we've everything required to start printing values. Let's reimplement the
+`greet` function to print the value directly rather than returning a string.
+
+Functions must always return a value. If there is no meaningful value to return,
+we return unit instead.
+
+```clojure
+(let greet [name]
+  ;; "<>" is a semigroup append function. Since string concatenation forms a
+  ;; free semigroup, it behaves the same as `String/concat`.
+  (println (f"{}" (<> "Hello, " name))))
+```
+
+`println` always expects a format constructor; we can't pass a standard string
+as its argument directly. To convert format strings into plain strings, we can
+use the `String/from-format` function.
+
+```clojure
+(let to-embed "World")
+(String/from-format f"Hello, {to-embed}!") ; Hello, World!
+```
+
+### 4. Brief view of data structures
+
+#### 4.1. Lists
 
 Lists are dynamic, ordered, homogeneous singly-linked lists. Lists are
 persistent data structures, meaning the data structure is immutable and always
@@ -329,7 +385,7 @@ later.
   (:: head _) (println (f"The first element is {head}")))
 ```
 
-#### 7.3. Arrays
+#### 4.2. Arrays
 
 Arrays are fixed-sized, contiguous, homogeneous collections. Unlike in OCaml,
 Miru arrays are immutable.
@@ -385,7 +441,7 @@ is very common, the helper function `Array/offset` makes things easier for us.
 (println (f"{}" (Array/nth-offset (Array/offset [| 2 2 |]) arr)))
 ```
 
-#### 7.4. Mutable arrays
+#### 4.3. Mutable arrays
 
 Mutable arrays are the mutable variant of arrays, allowing for in-place
 mutation. In Miru, mutability is a property of data structures. Consequently,
@@ -425,12 +481,12 @@ Mutable arrays can also be N-dimensional.
 (println (f"{}" (Mut-array/nth-offset (Array/offset [| 2 2 |]) arr))) ; (Some 10)
 ```
 
-#### 7.5. Dynamic arrays
+#### 4.4. Dynamic arrays
 
 Dynamic arrays are the resizable version of mutable arrays, commonly referred to
 as vectors in other languages. Unlike their fixed-size counterparts, dynamic
 arrays are strictly 1-dimensional. Hence, there is no intrinsic way to build
-dynamically dimension-reshaping arrays. Instead, you can use a 1D dynamic array
+dynamically dimension-reshaping arrays. Instead, we can use a 1D dynamic array
 to handle runtime growth and then perform a zero-copy cast to a fixed N-D array,
 provided the total element count matches the target shape.
 
@@ -451,7 +507,7 @@ provided the total element count matches the target shape.
 (let arr (Array/from-dyn [| 3 3 |] dyn-arr)) ; Cast it into a 3x3 2D array.
 ```
 
-#### 7.6. Views
+#### 4.5. Views
 
 Non-owning or borrowed views are as important as owning data containers. They
 allow Miru to provide natural, non-copying slicing operations using strided
@@ -463,7 +519,7 @@ borrowing, which we will explore in further detail later.
 > [!NOTE]
 > This section requires ironing out modalities and cross-mode interaction.
 
-#### 7.7. Sets
+#### 4.6. Sets
 
 Base provides five set variants: CHAMP sets, hash sets, sorted sets, ordered
 sets, and bit sets. Let's take a brief look at them all at once.
@@ -473,6 +529,8 @@ sets, and bit sets. Let's take a brief look at them all at once.
 ;; persistent, purely applicative, unordered, homogeneous collections that
 ;; enforce unique elements.
 (Set/from-list :(1 2 3))
+;; or the alias:
+(Champ-set/from-list :(1 2 3))
 
 ;; Hashsets are mutable, non-persistent, unordered (hash-based) linear
 ;; collections.
@@ -481,17 +539,21 @@ sets, and bit sets. Let's take a brief look at them all at once.
 ;; Sorted sets are immutable, persistent, value-ordered (Persistent B-Tree)
 ;; collections.
 (Base/Collections/Sorted-set/from-list :(1 2 3))
+;; or the alias:
+(Base/Collections/B-tree-set/from-list :(1 2 3))
 
 ;; Ordered sets are immutable, persistent, insertion-ordered (Linked CHAMP)
 ;; collections.
 (Base/Collections/Ordered-set/from-list :(1 2 3))
+;; or the alias:
+(Base/Collections/Linked-champ-set/from-list :(1 2 3))
 
 ;; Bit sets are mutable or unboxed, bitwise-packed sets of non-negative
 ;; integers.
 (Base/Collections/Bit-set/from-list :(0 1 64 128))
 ```
 
-#### 7.8. Maps
+#### 4.7. Maps
 
 Base provides four map variants: CHAMP maps, hash maps, sorted maps, and ordered
 maps. Let's take a brief look at them all at once.
@@ -500,6 +562,8 @@ maps. Let's take a brief look at them all at once.
 ;; CHAMP maps are the default map implementation in Miru. They are immutable,
 ;; persistent, purely applicative, unordered, homogeneous key-value collections.
 (Map/from-list :(["id" 1] ["id-2" 2])) ; List of 2-tuple (pair).
+;; or the alias:
+(Champ-map/from-list :(["id" 1] ["id-2" 2]))
 
 ;; Hashmaps are mutable, non-persistent, unordered (hash-based) linear
 ;; key-value maps.
@@ -509,10 +573,14 @@ maps. Let's take a brief look at them all at once.
 ;; key-value maps. Orders entries by key comparison to enable range queries
 ;; and bounds slicing.
 (Base/Collections/Sorted-map/from-list :(["id" 1] ["id-2" 2]))
+;; or the alias:
+(Base/Collections/B-tree-map/from-list :(["id" 1] ["id-2" 2]))
 
 ;; Ordered maps are immutable, persistent, insertion-ordered (Linked CHAMP)
 ;; key-value maps.
 (Base/Collections/Ordered-map/from-list :(["id" 1] ["id-2" 2]))
+;; or the alias:
+(Base/Collections/Linked-champ-map/from-list :(["id" 1] ["id-2" 2]))
 ```
 
 Mutable hash sets and hash maps can function as accumulators for the persistent
@@ -520,7 +588,45 @@ variants, much like dynamic arrays do for N-D arrays. However, unlike the
 latter, converting between hash variants and persistent variants is not
 zero-copy and will allocate due to layout differences.
 
-#### 7.9. Records and Modules
+### 5. Types
+
+We can alias a type by using the `alias` specifier.
+
+```clojure
+(type (alias word) (option int)) ; Why would anyone want an optional word :O?
+```
+
+Types can be recursive, just like functions. Unlike OCaml, types are not
+recursive by default, hence require the `rec` specifier. The compiler being
+multi-pass makes Mutual recursion a natural consequence. This example makes use
+of variant types which will be discussed in later chapters.
+
+```clojure
+(type (rec expression)
+  (Literal int)
+  (Variable string)
+  (Block (list statement)))
+
+(type (rec statement)
+  (Assignment [string expression])
+  (If-then-else [expression statement statement])
+  (Void-expression expression)))
+```
+
+### 6. Within product types
+
+#### 6.1. Tuples
+
+Tuples are immutable, fixed-sized collections of heterogeneous elements. Tuples
+are structural product types. We can use the same inspection operator `/` to
+access the fields of a tuple.
+
+```clojure
+(let tup [1, 2.0 "Hello World"]) ; Commas are treated the same as whitespace.
+(println (f"{}" tup/1)) ; 2.0
+```
+
+#### 6.2. Nominal records
 
 Records are product types, just like tuples. They are nominal by default but can
 be made structural to explicitly enable row-polymorphism.
@@ -539,20 +645,22 @@ anonymous definitions.
 (println (f"{}" s1/id)) ; MIRU
 
 (let s1 { id "MIRU", name "Miru Session", age 78 })
-;;      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ERROR: Unbound record
+;;      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ERROR: Unbound record.
 ```
 
+#### 6.3. Structural records
+
 To opt into structural typing, we can append the row operator `..`. This forces
-the compiler to treat the record as an open, anonymous shape instead of binding
-it to a primary nominal definition. The example below will be inferred
-structurally as `{ id : string, name : string, .. }` rather than `session`.
+the compiler to treat the record as an open anonymous shape instead of binding
+it to a principal type. Thus, this expression will be inferred structurally as
+`{ id : string, name : string, .. }`, not `session`:
 
 ```clojure
 (let s2 { id "MIRU", name "Miru Session", .. })
 ```
 
-You can cast a structural record to a nominal definition in case it respects the
-field contracts.
+We can explicitly cast a structural record to a principal type in case it
+respects the field contracts.
 
 ```clojure
 (val s2 : session)
@@ -563,27 +671,28 @@ field contracts.
 ```
 
 After the cast, `s2` will behave just like any nominal `session` record. Extra
-fields specified by the structural record that the nominal type doesn't include
-become inaccessible:
+fields specified by the structural record become inaccessible:
 
 ```clojure
 (println (f"{}" s2/id)) ; MIRU
 (println (f"{}" s2/age))
-                ;  ^^^ ERROR: Unbound field 'age'
+;;                 ^^^ ERROR: Unbound field 'age'.
 ```
 
-This enables field-level row-polymorphism. For example, let's define a function
-that takes any record containing an `id` field and prints it.
+#### 6.4. Field-level row-polymorphism
+
+This enables a property called field-level row-polymorphism. For example, let's
+define a function that takes any record containing an `id` field and prints it.
 
 ```clojure
 (val print-id : { id : string, .. } -> unit)
 (let print-id [record]
   (println (f"{}" record/id)))
 
-;; Both of these work because they have an `id` field, despite `s1` being
+;; Both of these work because they have an `id` field, despite the latter being
 ;; nominal.
+(print-id { id "Something", .. }) ; Something
 (print-id s1) ; MIRU
-(print-id s2) ; MIRU
 ```
 
 `..<name>` can be used when the row variable needs a specific name. In this
@@ -594,8 +703,10 @@ into abstract types with greater detail in the later chapters.
 (val print-id : { id : string, ..r } -> unit)
 ```
 
-f a record field shares the same name as a named binding, we can use the field
-binding operator `~` to avoid redundant duplicates.
+#### 6.5. Record bindings operators
+
+If a record field shares the same name with a named binding, we can use the
+field binding operator `~`.
 
 ```clojure
 (let id "value")
@@ -607,8 +718,45 @@ rebind field names.
 
 ```clojure
 (let { field <~ id, .. } record)
-(println f"{field}")
+(println f"{field}") ; value
 ```
+
+The splat operator `<id>..` can be used to splat the _known_ (source's row
+operator `..` is not splat) fields of a record into another record. It's the
+logical equivalent of the struct update syntax in Rust or record copy
+(functional update) in OCaml; it always creates a brand new record. The fields
+are either copied or their ownerships are moved given the values are
+non-copyable.
+
+```clojure
+(let s1 { id "M1", name "MIRU" }) ; Say of type `session`.
+(let s2 { s1.., name "Miru" }) ; Gets the fields of `s1` and updates `name`.
+
+;; Interaction with the row operator `..`:
+(let s1 { id "M1", name "MIRU", .. })
+(let s2 { s1.., name "Miru" }) ; It is inferred as `session` because the row
+                               ; operator `..` can't be splat making the
+                               ; record nominal.
+```
+
+Records must be splat before their fields can be updated. This order is not
+valid:
+
+```clojure
+(let s1 { id "M1", name "MIRU" })
+(let s2 { name "Miru", s1.. })
+;;                     ^^^^ ERROR: Invalid splat position. Splats must
+;;                          precede field updates.
+```
+
+We can always make the result structural to avoid nominality.
+
+```clojure
+(let s1 { id "M1", name "MIRU", .. })
+(let s2 { s1.., name "Miru", .. }) ; Make the result structural too.
+```
+
+#### 6.6. Mutable fields
 
 Records can have mutable fields using the `mut` specifier.
 
@@ -620,10 +768,23 @@ Records can have mutable fields using the `mut` specifier.
 Field mutation uses the same mutating operator `<-`.
 
 ```clojure
-(let p1 { name "John Doe", age 30 })
+(let p1 { name "John Doe", age 30, .. })
 (<- 31 p1/age)
 (println (f"{}" p1/age)) ; 31
 ```
+
+Structural records can also define mutable fields by applying the `mut`
+specifier directly to the field name within the literal. While this inline
+specifier is optional for nominal records, whose mutability is pre-defined by
+their explicit type signatures, it can be used for them as well.
+
+```clojure
+(let p2 { name "Jane Doe", (mut age) 30, .. })
+(<- 32 p2/age)
+(println (f"{}" p2/age)) ; 32
+```
+
+#### 6.7. Reference cells
 
 We can use this property to build a reference cell around records to emulate
 mutable names.
@@ -639,7 +800,7 @@ mutable names.
 (println (f"{}" name/contents)) ; MIRU
 ```
 
-This is a very useful construct, and Base provides it by default. Mutating and
+This is a very useful construct, and `Base` provides it by default. Mutating and
 dereferencing are common enough that Miru includes a built-in reader (`!<id>`)
 for references and a symbolic function (`:=`) for mutation, similar to OCaml.
 
@@ -656,9 +817,11 @@ The `:=` function is implemented as follows:
   (<- value container/contents))
 ```
 
+#### 6.8. Record signatures and structures
+
 Structural records in particular have access to special `sig` and `struct`-forms
-that make them much cleaner to write. Nominal records cannot be represented
-using `sig` and `struct`-forms, as these forms are inherently open-ended. Let's
+that make them cleaner to write. Nominal records cannot be represented using
+`sig` and `struct`-forms, as these forms are inherently open-ended. Let's
 rewrite the `session` type structurally:
 
 ```clojure
@@ -667,15 +830,15 @@ rewrite the `session` type structurally:
     (val id : string)
     (val name : string)))
 
-(val first : session) ; Casting/specification is required as structural records
-                      ; do not unify with nominal definitions automatically in
-                      ; order to preserve decidable unification.
+(val first : session) ; Casting is required as structural records do not unify
+                      ; with principal types automatically, preserving decidable
+                      ; unification.
 (let first
   (struct
     (let id "Miru")
     (let name "The first session")))
 
-;; This is identical to literal structural records.
+;; This is identical to writing structural records in literal form.
 (type session
   { id : string, name : string, .. })
 
@@ -683,19 +846,40 @@ rewrite the `session` type structurally:
 (let first { id "Miru", name "The first session", .. })
 ```
 
-Records can also hold arbitrary type witness or abstract types.
+#### 6.9. Abstract types in records
+
+Records can also hold arbitrary abstract types. . The visibility and resolution
+of these abstract types depend on the life-cycle of the containing record:
+
+- **Path-Dependent Types:** If the enclosing record is bound to a known,
+  immutable, and stable structural path, the abstract type is inferred as
+  path-dependent.
+- **Type Witnesses:** If the enclosing record is anonymous, unpacked locally, or
+  otherwise loses its structural identity, the abstract type is treated as an
+  opaque existential type witness.
+
+We will discuss these mechanics in greater detail in later chapters,
+specifically regarding their interactions with GADTs, applicative functors, and
+generative functors.
 
 ```clojure
 (type ORD
-  { (type t) . ; `.` sementically means `in`.
+  { (type t) .
+    compare : t -> t -> int })
+
+;; `.` means `in`. The following is also valid syntax.
+(type ORD
+  { (type t) in
     compare : t -> t -> int })
 
 ;; or, using the `sig`-form.
 (type ORD
   (sig
-    (type t)
+    (type t) ; No `in` required in `sig`-forms; the reader handles it for us.
     (val compare : t -> t -> int)))
 ```
+
+#### 6.10. Modular encapsulation
 
 Fields are public by default, but we can take advantage of the row operator `..`
 consuming unspecified fields to control visibility.
@@ -708,18 +892,19 @@ consuming unspecified fields to control visibility.
 (val second : session)
 (let second
   (struct
-    ;; The `id` field is not accessible outside.
+    ;; The `id` field is not accessible outside because the `session` type
+    ;; doesn't expose it.
     (let id "Miru")
     (let greet [()]
       (println f"Hello, {id}!"))))
 
 (second/greet ()) ; Hello Miru!
 (println (f"{}" second/id))
-;                      ^^ ERROR: Unbound field 'id'
+;;                     ^^ ERROR: Unbound field 'id'.
 ```
 
 Miru additionally provides an `exposes`-form to perform the same encapsulation
-inside-out. This can be used inside both `sig` and `struct`-forms.
+but inside-out. This can only be used inside `sig` and `struct`-forms.
 
 ```clojure
 (type session
@@ -739,96 +924,118 @@ inside-out. This can be used inside both `sig` and `struct`-forms.
 
 (second/greet ()) ; Hello Miru!
 (println (f"{}" second/id))
-;                      ^^ ERROR: Unbound field 'id'
+;;                     ^^ ERROR: Unbound field 'id'.
 ```
 
 The `exposes`-form reflects top-level definitions. This is what a module looks
-like in Miru; they are, at their core, just structural records coupled with an
-additional ability to control encapsulation inside-out.
+like in Miru; they are, at their core, just structural records coupled with
+fancier syntax and an additional ability to control encapsulation inside-out.
 
-> [!NOTE]
-> The section below is yet to be serialized properly.
+### 7. Within sum types
+
+#### 7.1. Nominal variants
+
+The `type`-form can also be used to define variant or sum types. Variants
+constructors are explicitly nominal and must be capitalized. They are made
+available in the global scope automatically.
 
 ```clojure
-;; We can also use the type expression to define sum or variant types.
 (type shape
-  (Circle { radius : float, .. })) ; Variant constructors must be capitalized.
+  (Circle int)
+  (Rectangle [int int]))
 
-(let [basic-circle { radius 5.0, .. }
-      fancy-circle { radius 10.0, color "red", .. }
-      shape-1 (Circle basic-circle)
-      shape-2 (Circle fancy-circle)]) ; Both are valid.
+(let circle (Circle 10))
+(let rectangle (Rectangle [10 10]))
+;; is not the same as:
+(let rectangle [10 10])
+```
 
-;; Let's look at more examples of variant types:
-(type colors
+Constructors can wrap both nominal and structural records.
+
+```clojure
+(type shape
+  (Circle { radius : int, .. }))
+
+(let basic { radius 5, .. })
+(let fancy { basic.., color "red", .. })
+(let basic-circle (Circle basic))
+(let fancy-circle (Circle fancy)) ; Both work.
+```
+
+#### 7.2. Marker constructors
+
+Marker constructors (constructors without payloads) do not require enclosing
+parentheses in type declarations. In this example, the reader treats `(Gray)`
+and `Gray` identically.
+
+```clojure
+(type color
   (White)
-  Gray ; Parens are optional for constructors with no payload.
+  Gray ; Parens are optional for marker constructors.
   (Black)
-  (RGB [int int int]) ; Tuple variants are also allowed.
-  (HSL { h int, s int, l int })) ; Record variants as usual.
+  (RGB [int int int])
+  (HSL { h int, s int, l int }))
 
-;; The constructors are made available in the global scope.
-(let a White)
+(let a White) ; Same goes here.
 (let b (RGB [240 80 40]))
 (let c (HSL { h 240, s 80, l 40 }))
+```
 
-;; Tuples variants are strictly nominal even though tuples are structural.
-;; Record variants are strictly normial even though records can be structural.
-;; Match expressions are really handy when it comes to ADTs.
+#### 7.3. `match`-form and variants
+
+The `match`-form serves as the primary elimination construct for variants. It
+provides structural pattern matching, payload extraction via field inspection
+operator `/`, and pattern unions via the `union`-form or `|`-form.
+
+```clojure
 (match a
-  ;; (or ...) is a special form inside a match expression forming a union.
-  (or White Gray Black)
+  (| White Gray Black)
     (println f"Got constructors with no payload!")
 
   (RGB t)
     (println (f"Got: {} * {} * {}" t/0 t/1 t/2))
 
   (HSL r)
-    (println (f"Got: {{ h {}, s {}, l {} }}" r/h r/s r/l))
+    (println (f"Got: {{ h {}, s {}, l {} }}" r/h r/s r/l)))
     ;;               ^        <->        ^ {{ or }} to escape interpolation.
-    ;; or just:
-    (println (ff"Got: { h {{}}, s {{}}, l {{}} }" r/h r/s r/l)))
-    ;; Any of these work.
-  
-;; We use the "alias" specifier to create type aliases.
-(type (alias word) (option int)) ; Why would anyone want an optional word :O?
+```
 
-;; We can also use (and ...) for mutually recursive types! Unlike OCaml, types
-;; require the "rec" specifier. Implicit recursion is not allowed anywhere in
-;; Miru.
-(type (rec expression)
-  (Literal  int)
-  (Variable string)
-  (Block    (list statement)))
+In this example, we express trees using variants:
 
-(and statement
-  (Assignment      [string expression])
-  (If-then-else    [expression statement statement])
-  (Void-expression expression)))
-
-;; Lets build a tree for an example.
-(type (tree a)
+```clojure
+(type (rec tree a)
   Empty
   (Node [(tree a) a (tree a)]))
 
-;; And use it:
 (let example-tree
   (Node [
     (Node [Empty 7 Empty])
     5
     (Node [Empty 9 Empty])]))
+```
 
-;; Variants are closed by nature. You can't extend them. This is where
-;; structural variants come into picture; they operate the same way
-;; you would expect them to behave in OCaml. This is also powered using
-;; row-polymorphism but extended to variants. They are open and can form
-;; a structural union.
-(type small { :A :B }) ; This is not row polymorphic.
+#### 7.4. Structural variants
+
+Standard variants are nominal hence closed by nature; we cannot pass a variant
+with three tags into a function expecting five tags without explicit conversion
+logic. Miru solves this using structural variants which are conceptually
+identical to polymorphic variants in OCaml. Structural variants use
+Clojure-inspired `:Variant` syntax. They are open-ended, and governed by
+row-polymorphism across sum tags.
+
+```clojure
+(type small { :A :B })
 (type large { :A :B :C (:D string) .. }) ; They can have payloads as usual.
+```
 
-;; They look a lot like keywords in Clojure but statically typed. Infact,
-;; they are a drop-in replacement for a lot of cases where you'd
-;; traditionally use keywords. Hence, the similar syntax.
+They are a drop-in replacement for a lot of cases where we'd traditionally use
+keywords in other dynamically typed Lisps. Hence, the similar syntax. Functions
+accepting structural variants specify the required tags in their signature.
+Because subtyping in Miru is never implicit, passing a narrower structural
+variant into a wider parameter requires the explicit coercion operator `:>` (or
+its alias `as`).
+
+```clojure
 (let process-large [x]
   (match x
     :A           "Alpha"
@@ -837,61 +1044,77 @@ additional ability to control encapsulation inside-out.
     (:D payload) payload
     _            "?")))
 
-(let (item : small) :A)
-(let (process-large item)) ; ERROR: small is not compatible with large.
-(let (process-large (:> item large))) ; This works.
-;; Type coercion is explicit in Miru where ":>" is the coercion special form.
-;; (as ...) is an alias of (:> ...).
+(let item (:A : small))
+(process-large item)
+;;             ^^^^ ERROR: Type `small` is not sub-type compatible with `large`
+;;                  without explicit coercion.
 
-;; The colors variant example but with structural variants:
-(type colors
-  { :White
-    :Gray
-    :Black
-    (:RGB [int int int])
-    (:HSL { h int, s int, l int }) })
+(process-large (:> item large))
+(process-large (as item large)) ; Alternative syntax.
+```
 
-;; Let's introduce GADTs. For this example, let's model an expresssion
-;; evaluator.
-(type (exp _) ; The type variable we'll specialize.
-  ;; Notice the ":" after the constructor. You MUST specify the returning
-  ;; type. Specialization is explicit.
+#### 7.5. Generalized variants (GADTs)
+
+Generalized variants allow individual constructors to specialize the return type
+parameter of the variant itself. In Miru, GADTs are declared by placing a colon
+`:` after the constructor name and providing an explicit function mapping to the
+target specialized type.
+
+```clojure
+(type (exp _) ; The type hole to specialize.
   (Int     : int                   -> (exp int))
   (Bool    : bool                  -> (exp bool))
   (Add     : [(exp int) (exp int)] -> (exp int))
   (Is-zero : (exp int)             -> (exp bool)))
+```
 
-;; (type a) introduces a locally abstract type called "a." They are NOT
-;; unification variables. A type variable is a flexible placeholder that can
-;; unify with any type, while a locally abstract type creates a rigid, newly
-;; minted type identity scoped strictly inside that function. They are what
-;; enable local type refinement which is crucial to make GADTs work.
+To evaluate a GADT, standard unification variables are insufficient. Standard
+type variables are flexible (they must unify across the entire function),
+whereas GADT pattern matching requires locally abstract types.
+
+In Miru, `(type a)` introduces a locally abstract type identifier `a`. Unlike
+flexible type variables, locally abstract types introduce a rigid, newly-minted
+type identity scoped strictly inside the function signature. This rigidity
+allows the compiler to refine the identity of a branch-by-branch based on which
+GADT constructor matched.
+
+```clojure
 (val eval : (type a) . (exp a) -> a)
-(let (rec eval) [e] ; The "rec" specifier is a property of the binding not type.
-  ;; The abstract type "a" is refined in each branch independently.
+(let (rec eval) [e] ; Specifiers are a property of the binding not the type.
   (match e
+    ;; Inside this branch, `a` is locally refined to `int`.
     (Int n)     n
+    ;; Inside this branch, `a` is locally refined to `bool`.
     (Bool b)    b
+    ;; Inside this branch, `(exp a)` refines to `(exp int)`, so `eval` returns
+    ;; `int`.
     (Add [x y]) (+ (eval x) (eval y))
+    ;; Inside this branch, `(exp a)` refines to `(exp bool)`, so `eval` returns
+    ;; `bool`.
     (Is-zero x) (= (eval x) 0)))
-
-;; Now, we can introduce keyword aliases. Some forms in the type spec can be written
-;; more naturally if you want to:
-(val eval : (type a) in (exp a) -> a) ; Makes it easy to read!
 
 (let safe-exp (Add (Int 5) (Int 10)))
 (eval safe-exp) ; 15
+```
 
+Malformed ASTs are caught at compile time before execution.
+
+```clojure
 (let bad-exp (Add (Int 5) (Bool true))) 
 ;;                        ^^^^^^^^^^^ Expected (exp int), got (exp bool)
+```
 
+> [!NOTE]
+> The section below is yet to be serialized properly.
+
+```clojure
 ;; It's about time we introduce algebraic effects. For example, we define a simple
 ;; effect with two distinct effect operations. There are different kinds of
 ;; effect operation types: direct operations, one-shot controls, non-resuming
 ;; operations, muli-shot controls and raw controls. The order is intentional.
 
 (effect (state a)
-  ;; These are examples of direct operations. They are used when you want to
+  ;; These are examples of direct operations. They are used when we want to
   ;; perform an operation and return a value directly to the perform site while
   ;; having tail-resumption as a guarentee. They can resume exactly once and
   ;; have no access to a continuation because they do not allocate one! They
@@ -907,7 +1130,7 @@ additional ability to control encapsulation inside-out.
   (set (+ current amount))
   (get ()))
 
-;; "!" has a keyword alias too in case you like this better.
+;; "!" has a keyword alias too in case we like this better.
 (val increment-by : int -> int performs { (state int) .. })
 
 ;; Now, let's write a handle for the function. It reduces the state effect
@@ -951,7 +1174,7 @@ additional ability to control encapsulation inside-out.
   (action ()))
 
 ;; And a function that produces some result.
-;; NOTE: When sending the entire row, you don't need { ..<id> } and can
+;; NOTE: When sending the entire row, we don't need { ..<id> } and can
 ;; rather collapse it into an <id>.
 (val run-print : (iterator int) ! e -> unit ! e)
 (let run-print [iter]
@@ -1044,11 +1267,11 @@ additional ability to control encapsulation inside-out.
   (with (handle
     (return _) (Done)
     [(yield x) context] ; Raw controls pass their raw context.
-      (Next [x #(context/resume ())]))) ; You need to resume FROM the context.
+      (Next [x #(context/resume ())]))) ; We need to resume FROM the context.
   (action ()))
 
-;; Raw controls do not automatically finalize the execution path. You have to take
-;; the responsibility onto yourself i.e. ((.finalize context) ()). Raw controls
+;; Raw controls do not automatically finalize the execution path. We have to take
+;; the responsibility onto ourselves i.e. ((.finalize context) ()). Raw controls
 ;; can be multi-shot but requires effect group annotation similar to controls. 
 
 ;; Let's take a bit of time to understand the with-expression. Here are some
@@ -1062,7 +1285,7 @@ additional ability to control encapsulation inside-out.
 
 ;; That's a lot of nesting. Now let's rewrite it with with-expression.
 ;; This makes the code very linear. with-expression takes advantage of the
-;; fact that Miru functions auto-curry and rewrite the scope for you.
+;; fact that Miru functions auto-curry and rewrite the scope for us.
 (let count-steps [()]
   (with s (scoped 0))
   (:= (+ !s 1) s)
@@ -1104,7 +1327,7 @@ additional ability to control encapsulation inside-out.
 
 ;; Module types are record types. By convention, they are always in UPPERCASE.
 (type ORD
-  { (type t) . ; You can define abstract types here and use them in the record body.
+  { (type t) . ; We can define abstract types here and use them in the record body.
     compare : t -> t -> int, .. }) ; They need to be structural to enable subtyping.
 
 ;; Let's write a storing function.
@@ -1119,7 +1342,7 @@ additional ability to control encapsulation inside-out.
   (foldr insert :() lst))
 
 ;; Functors are just normal functions. Notice the sorting interface is stuctural.
-;; But you could make it a seperate type too. By conventions, modules and functors
+;; But we could make it a seperate type too. By conventions, modules and functors
 ;; are Header-cased.
 (val Make-sorter : ORD -> { (type t) . sort : (list t) -> (list t), .. })
 (let Make-sorter [M]
@@ -1145,7 +1368,7 @@ additional ability to control encapsulation inside-out.
   { (type t = M/t) .
     sort #(sort-generic M/compare %), .. })
 
-;; Now, we can use our new functor. Unlike OCaml, Miru doesn't force you to curry
+;; Now, we can use our new functor. Unlike OCaml, Miru doesn't force we to curry
 ;; the unit call because functors are normal functions. The type t is minted uniquely
 ;; for each call making them different hence generative.
 (let Int-asc-sorter-gen (Make-sorter-gen Int-asc)) ; Curried!
@@ -1162,10 +1385,10 @@ additional ability to control encapsulation inside-out.
 ;; (which is a module in this case) using <~.
 (val print-blank : S/t ? { S <~ SHOW .. } -> unit)
 (let print-blank [x]
-  (let S ?S) ; ?<id> is how you read from the context row.
+  (let S ?S) ; ?<id> is how we read from the context row.
   (println (f"{}" (S/show x))))
 
-;; You could also write the signature as:
+;; We could also write the signature as:
 (val print-blank : (type a) .
                    a ? { S <~ (SHOW ~> (type t = a)) .. } -> unit)
 ;; <~ is formally called a flat binding while ~> is called a structural binding.
