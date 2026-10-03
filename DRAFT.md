@@ -22,7 +22,7 @@ characters changes the semantic meaning.
 ;; This is also a comment, used for standalone lines.
 ;;; This is a documentation comment, placed on top of expressions or declarations.
 
-#! Hashbangs are also treated as comments. They are sementically the same as `;;`.
+#! Hashbangs are also treated as comments. They are semantically the same as `;;`.
 ```
 
 Miru has various built-in reader macros. One of them is `#_ <form>`, the discard
@@ -69,13 +69,13 @@ use the `val`-form to define the type of a binding ourselves.
 
 ```clojure
 (val greet : string -> string) ; `greet` is the name of the binding. The name is
-                               ; seperated from the signature using the type
+                               ; separated from the signature using the type
                                ; marker `:`. `->` is a mapping; it takes a
                                ; string as input and maps it to another string
                                ; as output.
 ```
 
-Lets define another function; this time with more arguments and type it
+Let's define another function; this time with more arguments and type it
 ourselves.
 
 ```clojure
@@ -87,20 +87,46 @@ ourselves.
            ; this scope. No return keyword required.
 ```
 
-We can annotate expressions with concrete types in-line using
-`(<expr> : <type>)`. This also extends to universal quantifiers (e.g.
-`(<expr> : forall a. <type>)`) and abstract types (e.g.
-`(<expr> : type a. <type>)`). But, effects, contexts, modalities and refinement
-types cannot be expressed inline. In such cases, opt for `val`-form. We'll
-discuss them more in later chapters.
+We can partially annotate fields we care about while leaving the others for the
+compiler to infer using type holes `_`.
 
 ```clojure
-(let multiply [(a : int) (b : int)] ; We can annotate the arguments.
-  ((* a b) : int)) ; We can annotate any expression.
+(val multiply : _ -> _ -> int)
+(let multiply [a b]
+  (* a b))
 ```
 
-Bindings do not have an explicit return type marker for inline annotations.
-Instead, we annotate the final returning expression directly.
+Type holes are not just limited to concrete types, they can infer effects, and
+contexts while setting defaults for modalities, and refinement predicates. Any
+unannotated component acts as an implicit wildcard hole, allowing us to specify
+only the exact constraints we care about at any given time. This forms the
+foundation for inline annotations, which are permitted in two specific
+positions:
+
+- Parameter tuples in `let`-form and `fn`-form.
+- Any intermediate term or returning expression.
+
+We can annotate them with concrete types using `(<expr> : <type>)`. This also
+extends to universal quantifiers (e.g. `(<expr> : (forall a) . <type>)`),
+abstract types (e.g. `(<expr> : (type a) . <type>)`), effects (e.g.
+`(<expr> ! { ... })`), contexts (e.g. `(<expr> ? { ... })`), modalities (e.g.
+`(<expr> @ { ... })`), and refinements (e.g. `(<expr> : int | (!= <expr> 0))`).
+We'll discuss more on each of them in later chapters.
+
+```clojure
+(let multiply [(a : int) b] ; We can annotate the arguments.
+  ((* a b) : int)) ; We can annotate any expression. There is no seperate
+                   ; type marker for returning values; we annotate the final
+                   ; returning expression directly.
+```
+
+This is semantically the same as:
+
+```clojure
+(val multiply : int -> _ -> int)
+(let multiply [a b]
+  (* a b))
+```
 
 #### 2.3. Sequential scopes and parallel bindings
 
@@ -224,13 +250,13 @@ Symbolic functions are valid too, although they must be defined inside `(...)`.
 In Miru, all expressions natively evaluate using prefix notation
 `(<fun> <x> <y> ...)`. To write complex mathematical chains or linear data flows
 without deep parenthesis nesting, we can lift any arity-2 function into an infix
-expression using `#ltr <form>` (left-to-right associative) and `#rtl <form>`
-(right-to-left associative).
+expression using `#ltr` (left-to-right associative) and `#rtl` (right-to-left
+associative) procedural macros.
 
 ```clojure
 (+ 1 (+ 2 (+ 3 4)))
 ;; can also be written as:
-#rtl (1 + 2 + 3 + 4)
+(#rtl 1 + 2 + 3 + 4)
 ```
 
 Alternatively,
@@ -238,18 +264,17 @@ Alternatively,
 ```clojure
 (- (- 7 3) 4)
 ;; can be written as:
-#ltr (7 - 3 - 4)
+(#ltr 7 - 3 - 4)
 ```
 
 This also generalizes to custom functions naturally. Let's reuse the `multiply`
 function we defined earlier.
 
 ```clojure
-#ltr (10 multiply 78)
+(#ltr 10 multiply 78)
 ```
 
-Like the `#_` discard reader, these readers intercept the forms that immediately
-follows at parse time before type checking occurs.
+We'll look more into procedural macros in later chapters.
 
 ### 3. Within strings
 
@@ -714,29 +739,50 @@ field binding operator `~`.
 ```
 
 When matching against a record, we can use the flat binding operator `<~` to
-rebind field names.
+rebind field names. The syntax follows `<new> <~ <old>`.
 
 ```clojure
-(let { field <~ id, .. } record)
+(let { field <~ id, _ } record) ; This is pattern matching.
 (println f"{field}") ; value
 ```
 
-The splat operator `<id>..` can be used to splat the _known_ (source's row
-operator `..` is not splat) fields of a record into another record. It's the
-logical equivalent of the struct update syntax in Rust or record copy
-(functional update) in OCaml; it always creates a brand new record. The fields
-are either copied or their ownerships are moved given the values are
-non-copyable.
+Notice that we use `_` for destructuring, not `..`. The row operator `..` is
+inherently constructive while pattern matching is inherently destructive. This
+is why Miru uses `_` throughout the language as the universal placeholder for
+data destruction, abandonment and catch all.
+
+The splat operator `<id>..` can be used to splat the fields of a record into
+another record. It's the logical equivalent of the struct update syntax in Rust
+or record copy (functional update) in OCaml; it always creates a brand new
+record. The fields are either copied or their ownerships are moved given the
+values are non-copyable.
 
 ```clojure
 (let s1 { id "M1", name "MIRU" }) ; Say of type `session`.
 (let s2 { s1.., name "Miru" }) ; Gets the fields of `s1` and updates `name`.
+```
 
-;; Interaction with the row operator `..`:
+When splatting a structural record, the splat operator preserves row
+polymorphism. The row variable `..` from the source record automatically flows
+into the destination record. This ensures that extra runtime fields are safely
+carried over without information loss, maintaining the structural open-world
+nature of the data:
+
+```clojure
 (let s1 { id "M1", name "MIRU", .. })
-(let s2 { s1.., name "Miru" }) ; It is inferred as `session` because the row
-                               ; operator `..` can't be splat making the
-                               ; record nominal.
+;; `s2` is inferred structurally as `{ id : string, name : string, .. }`
+;; rather than nominalizing. The row operator `..` flows from the source;
+;; no additional row operator `..` is required.
+(let s2 { s1.., name "Miru" })
+```
+
+If you wish to force a structural record to close down into a rigid principal
+type during a splat operation, you must explicitly type-cast the resulting
+expression:
+
+```clojure
+(val s3 : session)
+(let s3 { s1.., name "Miru" }) ; The row variable `..` is explicitly consumed.
 ```
 
 Records must be splat before their fields can be updated. This order is not
@@ -1016,12 +1062,12 @@ In this example, we express trees using variants:
 
 #### 7.4. Structural variants
 
-Standard variants are nominal hence closed by nature; we cannot pass a variant
-with three tags into a function expecting five tags without explicit conversion
-logic. Miru solves this using structural variants which are conceptually
-identical to polymorphic variants in OCaml. Structural variants use
-Clojure-inspired `:Variant` syntax. They are open-ended, and governed by
-row-polymorphism across sum tags.
+Nominal variants are closed by nature; we cannot pass a variant with three tags
+into a function expecting five tags without explicit conversion logic. Miru
+solves this using structural variants which are conceptually identical to
+polymorphic variants in OCaml. Structural variants use Clojure-inspired
+`:Variant` syntax. They are open-ended, and governed by row-polymorphism across
+sum tags.
 
 ```clojure
 (type small { :A :B })
@@ -1032,10 +1078,11 @@ They are a drop-in replacement for a lot of cases where we'd traditionally use
 keywords in other dynamically typed Lisps. Hence, the similar syntax. Functions
 accepting structural variants specify the required tags in their signature.
 Because subtyping in Miru is never implicit, passing a narrower structural
-variant into a wider parameter requires the explicit coercion operator `:>` (or
-its alias `as`).
+variant into a wider parameter requires the explicit coercion operator `:>`.
+Just like type annotation `:`, type coercion `:>` is always infix.
 
 ```clojure
+(val process-large : large -> string)
 (let process-large [x]
   (match x
     :A           "Alpha"
@@ -1044,13 +1091,13 @@ its alias `as`).
     (:D payload) payload
     _            "?")))
 
-(let item (:A : small))
-(process-large item)
-;;             ^^^^ ERROR: Type `small` is not sub-type compatible with `large`
-;;                  without explicit coercion.
+(process-large (:A : small))
+;;             ^^^^^^^^^^^^ ERROR: Type `small` is not sub-type compatible with
+;;                          `large` without explicit coercion.
 
-(process-large (:> item large))
-(process-large (as item large)) ; Alternative syntax.
+(process-large (:A : small :> large))
+;; or in this example, you could just:
+(process-large (:A : large))
 ```
 
 #### 7.5. Generalized variants (GADTs)
@@ -1342,7 +1389,7 @@ Malformed ASTs are caught at compile time before execution.
   (foldr insert :() lst))
 
 ;; Functors are just normal functions. Notice the sorting interface is stuctural.
-;; But we could make it a seperate type too. By conventions, modules and functors
+;; But we could make it a separate type too. By conventions, modules and functors
 ;; are Header-cased.
 (val Make-sorter : ORD -> { (type t) . sort : (list t) -> (list t), .. })
 (let Make-sorter [M]
@@ -1362,7 +1409,7 @@ Malformed ASTs are caught at compile time before execution.
 
 ;; Functors are applicative by default similar to OCaml. Thus Miru also inherits
 ;; OCaml's convention of using unit to define generative functors syntactically.
-;; This is less about sementic clarity and more about a pragmatic middle ground.
+;; This is less about semantic clarity and more about a pragmatic middle ground.
 (val Make-sorter-gen : ORD -> unit -> { (type t) . sort : (list t) -> (list t), .. })
 (let Make-sorter-gen [M ()]
   { (type t = M/t) .
