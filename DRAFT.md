@@ -57,8 +57,8 @@ sequential.
 
 ;; This is a unary (arity = 1) function binding.
 (val greet [name] ; Arguments are passed in tuple form [<x> <y> ...].
-  (String/concat "\s" ::("Hello" name))) ; ::(...) is a list.
-
+  (String/concat "\s" '("Hello" name))) ; '(...) is a list at all times
+                                        ; NOT a quotation.
 ;; Now, we can apply the function.
 (greet name) ; Hello Miru
 ```
@@ -145,34 +145,36 @@ tail-recursive implementation of factorial. Miru will automatically perform
 tail-call elimination for all tail-recursive functions.
 
 ```clojure
-(val (rec factorial) [n &(acc 1)] ; Default value for `acc` is 1.
+(val (rec factorial) [n (val acc 1)] ; You can inline `val`-forms to set
+                                     ; default values of arguments.
   (if (<= n 1)
     acc
     (factorial (- n 1) (* n acc))))
 
-;; And we can call it as such:
+;; Now, let's call it.
 (factorial 6) ; 720
 
-;; Or, we can get as explicit as we want:
-(factorial &(acc 1) &(n 6)) ; Order doesn't matter with named arguments.
+;; Or, get a tad bit explicit.
+(factorial (val acc 1) (val n 6)) ; Order doesn't matter with named arguments.
 ```
 
 If we try to do the same but without the `rec` specifier, we are greeted with an
 error.
 
 ```clojure
-(val factorial [n &(acc 1)]
+(val factorial [n (val acc 1)]
   (if (<= n 1)
     acc
     (factorial (- n 1) (* n acc))))
-;;  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ERROR: Unbound binding `factorial`
+;;  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ERROR: Unbound binding `factorial`. Did you
+;;                                 forget to mark `factorial` as recursive?
 ```
 
 We can extend this naturally to mutually recursive functions.
 
 ```clojure
-;; Ending names in `?` is a convention for boolean functions.
-(val (rec is-even?) [n]
+(val (rec is-even?) [n] ; Ending names in `?` is a convention for boolean
+                        ; functions.
   (match n
     0 true
     n (is-odd? (- n 1))))
@@ -184,39 +186,38 @@ We can extend this naturally to mutually recursive functions.
 ```
 
 Miru enforces a strict xor across all chained bindings. An entire sequence of
-`val` and `and`-forms must be entirely mutually recursive or non-recursive. You
-can't mix both behaviors within the same chain. The `and`-form effectively makes
-the `rec` specifier viral.
+`val` and `and`-forms must be either entirely mutually recursive or
+non-recursive. We can't mix both behaviors within the same chain.
 
 Miru supports fixed-point recursion using the `fix` function from the `Function`
 module, allowing us to bypass explicit recursion specifiers entirely. Any
 function definition can be treated as a fixed point by mapping it to a core
-combinator. Let's reimplement the factorial using fix-point.
+combinator. Below, we reimplement the factorial function using this fixed-point
+style, the `fn`-form, and the `#(...)` reader macro for `fn`-forms.
 
 ```clojure
-(begin ; Define a new block to control the scope of the open.
-  (open Base/Function) ; This is how you open a module or a record.
+(val factorial
+  (Function/fix #(fn [n (val acc 1)]
+    (if (<= n 1)
+      acc
+      (% (- n 1) (* n acc))))))
+;;     ^ is the placeholder for the first argument. Positional placeholders are
+;;       also allowed: %1 for first, %2 for second, and %n for nth position.
 
-  (val factorial
-    (fix (fn [self n &(acc 1)]
-           (if (<= n 1)
-            acc
-            (self (- n 1) (* n acc))))))
-
-  (factorial 6)) ; 720
+(factorial 6) ; 720
 ```
 
 Fix-points decouple the recursive step from the function itself. This is rather
 useful for memoization, dynamic programming, tracing, anonymous recursion, among
 many other domains.
 
-Fix-points aren't limited to functions; you can also find fix-points of data
+Fix-points aren't limited to functions; we can also find fix-points of data
 types. We'll explore them and their orthogonal variants in later chapters.
 
 #### 2.4. Automatic currying
 
-Miru does not support variadic arguments, as they are structurally incompatible
-with automatic currying.
+Miru supports automatic currying. Consequently, variadic arguments are not
+supported due to their structural incompatibility.
 
 ```clojure
 (val multiply [a b]
@@ -231,13 +232,14 @@ Currying makes composition clean and natural. In this example, `(* 2)` wraps a
 lambda that expects a second argument.
 
 ```clojure
-(val new-list (map (* 2) ::(1 2 3 4))) ; ::(2 4 6 8)
+(val new-list (map (* 2) '(1 2 3 4))) ; '(2 4 6 8)
 ```
 
 #### 2.5. Type annotations
 
 Let's get back to the `greet` function, which is inferred as `string -> string`.
-We can use the `val`-annotation form to define the type of a binding ourselves.
+We can also use the `val`-annotation form to define the type of a binding
+ourselves.
 
 ```clojure
 (val greet : string -> string) ; `greet` is the name of the binding. The name is
@@ -274,20 +276,29 @@ the exact constraints we care about at any given time. This forms the foundation
 for inline annotations, which are permitted in two specific positions:
 
 - Parameter tuples in `val`-form and `fn`-form.
-- Any intermediate term or returning expression.
+- Any expression or pattern.
 
-We can annotate them with concrete types using `:(<id> : <type>)`. This also
-extends to universal quantifiers (e.g. `:(<id> : (forall a) . <type>)`),
-abstract types (e.g. `:(<id> : (type a) . <type>)`), effects (e.g.
-`:(<id> ! { ... })`), contexts (e.g. `:(<id> ? { ... })`), modalities (e.g.
-`:(<id> @ { ... })`), and refinements (e.g. `:(<id> : <type> | <predicate>)`).
-We'll discuss more on each of them in later chapters. `:(...)` is a special
-reader designed to handle the infix type and modal subsystem at the value level.
+We can annotate inline parameters and expressions with concrete types by reusing
+the exact same `val`-annotation format we use at the top level. Just like with
+default values, reusing the annotation form here preserves grammar uniformity
+and eliminates the need for a separate, specialized reader macro.
+
+This extends naturally to universal quantifiers, abstract types, effects,
+contexts, modalities, and refinements. A quick reference follows:
+
+- **Arbitrary expressions:** `(val <expr> : <type>)`
+- **Identifier lookups:** `(val ^<id> : <type>)`
+- **Universal quantifiers:** `(val <id> : (forall a) . <type>)`
+- **Abstract types:** `(val <id> : (type a) . <type>)`
+- **Effects:** `(val <id> ! { ... })`
+- **Contexts:** `(val <id> ? { ... })`
+- **Modalities:** `(val <id> @ { ... })`
+- **Refinements:** `(val <id> : <type> | <predicate>)`
 
 ```clojure
-(val multiply [:(a : int) b]
-  :((* a b) : int)) ; There is no seperate type marker for returning values
-                    ; we annotate the final returning expression directly.
+(val multiply [(val a : int) b]
+  (val (* a b) : int)) ; There is no separate type marker for returning values
+                       ; we annotate the final returning expression directly.
 ```
 
 This is semantically the same as:
@@ -297,6 +308,12 @@ This is semantically the same as:
 (val multiply [a b]
   (* a b))
 ```
+
+> [!NOTE]
+> While inline expressions offer a flexible, quick way to guide the compiler
+> locally, they should be used sparingly. Whenever a function signature becomes
+> complex, involving dense modal logic, effects, or refinements, the top-level
+> `val`-annotation form is preferred to keep things readable.
 
 #### 2.6. Calling a function just for its side-effects
 
@@ -327,8 +344,9 @@ We can always define functions using lambdas and named bindings.
 
 ```clojure
 (val square (fn [x] (* x x)))
-;; or:
-(val square #(* % %)) ; #(...) is a special reader for lambdas.
+
+;; Or, we could always use the reader form.
+(val square #(* % %))
 
 (square 6) ; 36
 ```
@@ -341,50 +359,19 @@ If we want to alias a function, we do:
 
 #### 2.8. Symbolic functions
 
-Symbolic functions are valid too, although they must be defined inside `(...)`
-within the `let`-form.
+Symbolic functions are valid, but they must be defined inside an enclosure
+`(...)`.
 
 ```clojure
 (val (~/) [x] (/ 1.0 x))
 (~/ 4.0) ; 0.25
 ```
 
-#### 2.9. Infixing binary functions
-
-In Miru, all expressions natively evaluate using prefix notation
-`(<fun> <x> <y> ...)`. To write complex mathematical chains or linear data flows
-without deep parenthesis nesting, we can lift any binary (arity = 2) function
-into an infix expression using `#ltr` (left-to-right associative) or `#rtl`
-(right-to-left associative) procedural macros.
-
-```clojure
-(+ 1 (+ 2 (+ 3 4)))
-;; can also be written as:
-(#rtl 1 + 2 + 3 + 4)
-```
-
-Alternatively,
-
-```clojure
-(- (- 7 3) 4)
-;; can be written as:
-(#ltr 7 - 3 - 4)
-```
-
-This also generalizes to custom functions naturally. Let's reuse the `multiply`
-function we defined earlier.
-
-```clojure
-(#ltr 10 multiply 78)
-```
-
-We'll look more into procedural macros in later chapters.
-
 ### 3. Within strings
 
 #### 3.1. Standard strings
 
-Before we starting printing values, we need to explore strings and their forms.
+Before we start printing values, we need to explore strings and their forms.
 
 We start with standard strings and the ability to tag them. Tagged strings are
 very useful when we want to avoid constant escaping. In this example, `(tag)"`
@@ -478,7 +465,7 @@ preserves its previous versions when modified, relying heavily on structural
 sharing to make copying efficient.
 
 ```clojure
-(val lst ::(1 2 3))
+(val lst '(1 2 3))
 ```
 
 Lists do not provide language syntax for random access. However, we can always
@@ -493,7 +480,7 @@ Lists are intertwined with the cons function `::`. The following declaration is
 semantically identical to the first:
 
 ```clojure
-(val lst (:: 1 (:: 2 (:: 3 ::()))))
+(val lst (:: 1 (:: 2 (:: 3 '()))))
 ```
 
 We can always prepend more elements structurally.
@@ -507,8 +494,9 @@ later.
 
 ```clojure
 (match lst
-  ::() (println (f"The list is empty"))
+  '() (println (f"The list is empty"))
   (:: head _) (println (f"The first element is {head}")))
+;;         ^ we discard the tail.
 ```
 
 #### 4.2. Arrays
@@ -663,29 +651,29 @@ sets, and bit sets. Let's take a brief look at them all at once.
 ;; CHAMP sets are the default set implementation in Miru. They are immutable,
 ;; persistent, purely applicative, unordered, homogeneous collections that
 ;; enforce unique elements.
-(Set/from-list ::(1 2 3))
+(Set/from-list '(1 2 3))
 ;; or the alias:
-(Champ-set/from-list ::(1 2 3))
+(Champ-set/from-list '(1 2 3))
 
 ;; Hashsets are mutable, non-persistent, unordered (hash-based) linear
 ;; collections.
-(Base/Containers/Hash-set/from-list ::(1 2 3))
+(Base/Containers/Hash-set/from-list '(1 2 3))
 
 ;; Sorted sets are immutable, persistent, value-ordered (Persistent B-Tree)
 ;; collections.
-(Base/Containers/Sorted-set/from-list ::(1 2 3))
+(Base/Containers/Sorted-set/from-list '(1 2 3))
 ;; or the alias:
-(Base/Containers/B-tree-set/from-list ::(1 2 3))
+(Base/Containers/B-tree-set/from-list '(1 2 3))
 
 ;; Ordered sets are immutable, persistent, insertion-ordered (Linked CHAMP)
 ;; collections.
-(Base/Containers/Ordered-set/from-list ::(1 2 3))
+(Base/Containers/Ordered-set/from-list '(1 2 3))
 ;; or the alias:
-(Base/Containers/Linked-champ-set/from-list ::(1 2 3))
+(Base/Containers/Linked-champ-set/from-list '(1 2 3))
 
 ;; Bit sets are mutable or unboxed, bitwise-packed sets of non-negative
 ;; integers.
-(Base/Containers/Bit-set/from-list ::(0 1 1 0))
+(Base/Containers/Bit-set/from-list '(0 1 1 0))
 ```
 
 #### 4.7. Maps
@@ -696,26 +684,26 @@ maps. Let's take a brief look at them all at once.
 ```clojure
 ;; CHAMP maps are the default map implementation in Miru. They are immutable,
 ;; persistent, purely applicative, unordered, homogeneous key-value collections.
-(Map/from-list ::(["id" 1] ["id-2" 2])) ; List of 2-tuple (pair).
+(Map/from-list '(["id" 1] ["id-2" 2])) ; List of 2-tuple (pair).
 ;; or the alias:
-(Champ-map/from-list ::(["id" 1] ["id-2" 2]))
+(Champ-map/from-list '(["id" 1] ["id-2" 2]))
 
 ;; Hashmaps are mutable, non-persistent, unordered (hash-based) linear
 ;; key-value maps.
-(Base/Containers/Hash-map/from-list ::(["id" 1] ["id-2" 2]))
+(Base/Containers/Hash-map/from-list '(["id" 1] ["id-2" 2]))
 
 ;; Sorted maps are immutable, persistent, value-ordered (Persistent B-Tree)
 ;; key-value maps. Orders entries by key comparison to enable range queries
 ;; and bounds slicing.
-(Base/Containers/Sorted-map/from-list ::(["id" 1] ["id-2" 2]))
+(Base/Containers/Sorted-map/from-list '(["id" 1] ["id-2" 2]))
 ;; or the alias:
-(Base/Containers/B-tree-map/from-list ::(["id" 1] ["id-2" 2]))
+(Base/Containers/B-tree-map/from-list '(["id" 1] ["id-2" 2]))
 
 ;; Ordered maps are immutable, persistent, insertion-ordered (Linked CHAMP)
 ;; key-value maps.
-(Base/Containers/Ordered-map/from-list ::(["id" 1] ["id-2" 2]))
+(Base/Containers/Ordered-map/from-list '(["id" 1] ["id-2" 2]))
 ;; or the alias:
-(Base/Containers/Linked-champ-map/from-list ::(["id" 1] ["id-2" 2]))
+(Base/Containers/Linked-champ-map/from-list '(["id" 1] ["id-2" 2]))
 ```
 
 Mutable hash sets and hash maps can function as accumulators for the persistent
@@ -725,15 +713,19 @@ zero-copy and will allocate due to layout differences.
 
 ### 5. Types
 
-We can create aliases of types using the `alias` specifier.
+#### 5.1. Type aliases
+
+We can create type aliases using the `alias` specifier.
 
 ```clojure
 (type (alias word) (maybe int)) ; Why would anyone want an maybe word :O?
 ```
 
-Like functions, types can be recursive. However, types are recursive by default
-because they are commonly used to define self-referential data structures. This
-example uses variant types, which we will explore in detail in later chapters.
+#### 5.2. Recursive and non-recursive types
+
+Types are recursive by default because they are commonly used to define
+self-referential data structures. This example uses variant types, which we will
+explore in detail in later chapters.
 
 ```clojure
 (type expression
@@ -755,6 +747,27 @@ types.
   (Just a)
   Nothing)
 ```
+
+#### 5.3. Private types
+
+Private types allow us to expose a type's structure or representation for
+reading and inspection outside its defining module while restricting creation
+and modification. We create them using the `private`-form.
+
+```clojure
+(type account
+;     ^^^^^^^ 1
+  (private 
+    { owner : string
+      balance : int }))
+; ^^^^^^^^^^^^^^^^^^^^ 2
+; 1 = `account` is public; anyone can read fields like `acc.balance`.
+; 2 = `private`-form restricts direct record creation and field mutation outside
+;     the module.
+```
+
+They work in tandem with the module system; we'll explore more concrete examples
+in later chapters.
 
 ### 6. Within product types
 
@@ -802,22 +815,38 @@ it to a principal type. Thus, this expression will be inferred structurally as
 (val s2 { id "MIRU", name "Miru Session", .. })
 ```
 
-We can explicitly cast a structural record to a principal type in case it
-respects the field contracts.
+We can explicitly coerce a structural record to a principal type in case it
+respects the field contracts using the explicit coercion operator `:>`.
 
 ```clojure
-(val s2 :({ id "MIRU", name "Miru Session", age 78, .. } : session))
-                                          ; ^^^^^^ this field is consumed by the
-                                          ; `..` row operator during the cast to
-                                          ; `session`.
+(val s2 (val { id "MIRU", name "Miru Session", age 78, .. } :> session))
+                                             ; ^^^^^^ this field is consumed
+                                             ; by the `..` row operator during
+                                             ; the coercion to `session`.
 ```
 
-Or, use the `val`-annotation form.
+Alternatively, you can achieve the same result by combining the `val`-form with
+the lookup operator `^`.
 
 ```clojure
-(val s2 : session)
+(val s2 { id "MIRU", name "Miru Session", age 78, .. })
+;; We are shadowing `s2` here.
+(val s2 (val ^s2 :> session))
+;;      ^^^^^^^^^^^^^^^^^^^^ Find the value `s2` in scope, coerce it to `session`
+;;                           and return the coerced value in place.
+```
+
+Coercions can also be written using the `val`-annotation form.
+
+```clojure
+(val s2 :> session)
 (val s2 { id "MIRU", name "Miru Session", age 78, .. })
 ```
+
+Notice that this top-level annotation does not use the lookup operator `^`. When
+the lookup operator is omitted, the compiler assumes the target name immediately
+follows the annotation. This is exactly what we've been doing in the earlier
+examples.
 
 After the cast, `s2` will behave just like any nominal `session` record. Extra
 fields specified by the structural record become inaccessible.
@@ -866,14 +895,13 @@ When matching against a record, we can use the rebind operator `<~` to rebind
 field names. The syntax follows `<new> <~ <old>`.
 
 ```clojure
-(val { field <~ id, _ } record) ; This is a form of pattern matching.
+(val { field <~ id, .._ } record) ; This is a form of pattern matching.
 (println f"{field}") ; value
 ```
 
-Notice that we use `_` for destructuring, not `..`. The row operator `..` is
-inherently constructive while pattern matching is inherently destructive. This
-is why Miru uses `_` throughout the language as the universal placeholder for
-data destruction, abandonment and catch all.
+We name the row operator `_` to discard its value. Miru uses `_` as the
+universal placeholder for data destruction, abandonment, holes and catch all
+throughout the language.
 
 The splat operator `<id>..` can be used to splat the fields of a record into
 another record. It's the logical equivalent of the struct update syntax in Rust
@@ -900,19 +928,12 @@ nature of the data:
 ```
 
 If we wish to force a structural record to close down into a rigid principal
-type during a splat operation, we must explicitly type-cast the resulting
+type during a splat operation, we must explicitly coerce the resulting
 expression:
 
 ```clojure
-(val s3 :({ s1.., name "Miru" } : session)) ; The row variable `..` is
-                                            ; explicitly consumed.
-```
-
-Or, use the `val`-annotation form.
-
-```clojure
-(val s3 : session)
-(val s3 { s1.., name "Miru Session" })
+(val s3 (val { s1.., name "Miru" } :> session)) ; The row variable `..` is
+                                                ; explicitly consumed here.
 ```
 
 Records must be splat before their fields can be updated. This order is not
@@ -921,9 +942,28 @@ valid:
 ```clojure
 (val s1 { id "M1", name "MIRU" })
 (val s2 { name "Miru", s1.. })
-                     ; ^^^^ ERROR: Invalid splat position. Splats must
-                     ; precede field updates.
+;;                     ^^^^ ERROR: Invalid splat position. Splats must
+;;                     precede field updates.
 ```
+
+Because structural records allow open-world rows, splatting one structural
+record into another introduces the risk of silent field masking. If a source
+record carries an unexpected field within its row variable `..`, explicitly
+adding a field with the same name after the splat will shadow the hidden value.
+This can cause down-stream semantic bugs if subsequent consumers expect the
+hidden value's original configuration. To prevent this, Miru introduces _Lack
+Constraints_ using the strict conditional row syntax `..<id> \ {<field> ...}`:
+the row variable `p` is mathematically guaranteed to lack the specified field.
+
+```clojure
+(val transform : { ..p \ {a b c} } -> { a int, b string, c boolean, ..p })
+(val transform [input]
+  { input.., a 10, b "meta", c true })
+```
+
+In this example, `transform` safely adds new fields to an open-ended record
+while statically guaranteeing those fields do not already exist in the input,
+preventing silent overrides.
 
 #### 6.6. Mutable fields
 
@@ -934,7 +974,7 @@ before, this applies to every data structure with interior mutability including
 mutable arrays, dynamic arrays, etc.
 
 ```clojure
-(type (person r) ; `r` is a type parameter that is infered as a region.
+(type (person r) ; `r` is a type parameter that is inferred as a region.
   { name : string, (mut r age) : int })
 ```
 
@@ -988,7 +1028,7 @@ Multiple distinct data structures within the same scope can share a single
 logical region `r` regardless of being allocated on the stack or the heap. This
 allows the compiler to cleanly group and track their associated state effects.
 
-#### 6.8. `var`-form and the `run` function
+#### 6.8. `var`-form and the `run-state` function
 
 Reading and writing to mutable values within a bounded scope is referentially
 transparent, provided the mutation is strictly encapsulated and cannot be
@@ -1019,8 +1059,8 @@ is encoded via `(read r)` and `(write r)` effects respectively. When both
 operations happen in tandem, it can be encoded using a single `(state r)`
 effect. Like any other effect in Miru, they do not simply disappear; they infect
 the active effect row of any calling function and must be explicitly handled.
-The `run` function introduces and encapsulates the exact region `r` required to
-satisfy and discharge these effects.
+The `run-state` function introduces and encapsulates the exact region `r`
+required to satisfy and discharge these effects.
 
 ```clojure
 (type (person r)
@@ -1035,8 +1075,8 @@ satisfy and discharge these effects.
 
 (val celebrate : unit -> int) ; No effect pollution here.
 (val celebrate [()]
-  ; The `run` function creates a fresh logical region 'r' for its closure.
-  (run
+  ; The `run-state` function creates a fresh logical region 'r' for its closure.
+  (run-state
     #((val guest { name "John", (mut age) 30 })
       (birthday guest)
       guest/age)))
@@ -1048,7 +1088,7 @@ We can make use of the `with`-form to write it without nesting.
 (val celebrate [()]
   ; `with`-form allows us to eliminate deeply nested code blocks caused
   ; by trailing closures. More concrete examples will follow soon.
-  (with run)
+  (with run-state)
 
   (val guest { name "John", (mut age) 30 })
   (birthday guest)
@@ -1061,19 +1101,19 @@ Now, we can evaluate the function as usual:
 (celebrate ()) ; 31
 ```
 
-In fact, when a scope is evaluated, the compiler implicitly inserts a `run`
-function to encapsulate and discharge the resulting state effects from
-`var`-forms.
+In fact, when a scope is evaluated, the compiler implicitly inserts a
+`run-state` function to encapsulate and discharge the resulting state effects
+from `var`-forms. This example is equivalent to the original `var`-form example.
 
 ```clojure
 (begin
-  ; A `run` function to handle the region `r` required by `ref`.
-  (with run)
+  ; A `run-state` function to handle the region `r` required by `ref`.
+  (with run-state)
 
   (val x (ref 2))
   (val y !x) ; Manually dereferences `x`.
   (:= 3 x) ; `y` is still `2` after this.
-  ; Explicitely dereferences again.
+  ; Explicitly dereferences again.
   !x) ; 3
 ```
 
@@ -1090,19 +1130,19 @@ rewrite the `session` type structurally:
     (val id : string)
     (val name : string)))
 
-;; Casting is required as structural records do not unify with principal types
-;; automatically, preserving decidable unification.
-(val first : session)
+;; Coercion is required as structural records do not unify with principal
+;; types automatically, preserving decidable unification.
+(val first :> session)
 (val first
   (struct
     (val id "Miru")
     (val name "The first session")))
 
-;; This is identical to writing structural records in literal form.
+;; This example is identical to writing structural records in literal form.
 (type session
   { id : string, name : string, .. })
 
-(val first : session)
+(val first :> session)
 (val first { id "Miru", name "The first session", .. })
 ```
 
@@ -1124,13 +1164,13 @@ generative functors.
 
 ```clojure
 (type ORD
-  { (type t) .
+  { (type t) ; Records can hold abstract types.
     compare : t -> t -> int })
 
-;; or, using the `sig`-form.
+;; Or, we could use the `sig`-form.
 (type ORD
   (sig
-    (type t) ; No `.` required in `sig`-forms; signature sequencing handles it.
+    (type t)
     (val compare : t -> t -> int)))
 ```
 
@@ -1144,7 +1184,7 @@ consuming unspecified fields to control visibility.
   (sig
     (val greet : unit -> string)))
 
-(val second : session)
+(val second :> session)
 (val second
   (struct
     ;; The `id` field is not accessible outside because the `session` type
@@ -1169,7 +1209,7 @@ but inside-out. This can only be used inside `sig` and `struct`-forms.
     (val id : string)
     (val greet : unit -> string)))
 
-(val second : session)
+(val second :> session)
 (val second
   (struct
     ;; The `id` field is still not accessible outside.
@@ -1187,10 +1227,10 @@ rule. Because `exposes` is always evaluated after the entire scope has been
 resolved, it can seamlessly reference values defined later in the body,
 regardless of its literal position within that scope.
 
-Consequently, the `exposes`-form mirrors top-level definitions. This structure
-reflects how modules are implemented in Miru; at their core, they are just
-structural records coupled with fancier syntax and an additional ability to
-control encapsulation inside-out.
+Consequently, the `exposes`-form mirrors top-level definitions. This is
+intentional because it reflects how modules are implemented in Miru; at their
+core, they are just structural records coupled with fancier syntax and an
+additional ability to control encapsulation inside-out.
 
 ### 7. Within sum types
 
@@ -1207,7 +1247,7 @@ available in the global scope automatically.
 
 (val circle (Circle 10))
 (val rectangle (Rectangle [10 10]))
-;; is not the same as:
+;; This is not the same as:
 (val rectangle [10 10])
 ```
 
@@ -1218,14 +1258,14 @@ Constructors can wrap both nominal and structural records.
   (Circle { radius : int, .. }))
 
 (val basic { radius 5, .. })
-(val fancy { basic.., color "red", .. })
+(val fancy { basic.., color "red" })
 (val basic-circle (Circle basic))
 (val fancy-circle (Circle fancy)) ; Both work.
 ```
 
 #### 7.2. Marker constructors
 
-Marker constructors (constructors without payloads) do not require enclosing
+Marker constructors or constructors without payloads do not require enclosing
 parentheses in type declarations. In this example, the reader treats `(Gray)`
 and `Gray` identically.
 
@@ -1246,7 +1286,7 @@ and `Gray` identically.
 
 The `match`-form serves as the primary elimination construct for variants. It
 provides structural pattern matching, payload extraction via field inspection
-operator `/`, and pattern unions via the `union`-form or `|`-form.
+operator `/`, and pattern unions via the `|`-form often called the union.
 
 ```clojure
 (match a
@@ -1259,7 +1299,7 @@ operator `/`, and pattern unions via the `union`-form or `|`-form.
   (HSL r)
     (println (f"Got: {{ h {}, s {}, l {} }}" r/h r/s r/l)))
     ;;               ^        <->        ^ {{ or }} to escape interpolation.
-    ;; Notice it's f"..." not ff"...".
+    ;; Notice it's f"..." and not ff"...".
 ```
 
 In this example, we express trees using variants:
@@ -1295,7 +1335,6 @@ keywords in other dynamically typed Lisps. Hence, the similar syntax. Functions
 accepting structural variants specify the required tags in their signature.
 Because subtyping in Miru is never implicit, passing a narrower structural
 variant into a wider parameter requires the explicit coercion operator `:>`.
-Just like type annotation `:`, type coercion `:>` is always infix.
 
 ```clojure
 (val process-large : large -> string)
@@ -1307,13 +1346,13 @@ Just like type annotation `:`, type coercion `:>` is always infix.
     (:D payload) payload
     _            "?")))
 
-(process-large (:A : small))
-;;             ^^^^^^^^^^^^ ERROR: Type `small` is not sub-type compatible with
-;;                          `large` without explicit coercion.
+(process-large (val :A : small))
+;;             ^^^^^^^^^^^^^^^^ ERROR: Type `small` is not subtype compatible with
+;;                              `large` without explicit coercion.
 
-(process-large (:A : small :> large))
-;; or in this example, we could just:
-(process-large (:A : large))
+(process-large (val :A : small :> large))
+;; Or, in this example, we could just:
+(process-large (val :A : large))
 ```
 
 #### 7.5. Generalized variants (GADTs)
@@ -1324,11 +1363,12 @@ parameter of the variant itself. In Miru, GADTs are declared by placing a colon
 target specialized type.
 
 ```clojure
-(type (exp _) ; The type hole to specialize.
-  (Int     : int                   -> (exp int))
-  (Bool    : bool                  -> (exp bool))
-  (Add     : [(exp int) (exp int)] -> (exp int))
-  (Is-zero : (exp int)             -> (exp bool)))
+(type (expr' _) ; `expr` is an important builtin we shouldn't override.
+;;           ^ The type hole to specialize.
+  (Int     : int                       -> (expr' int))
+  (Bool    : bool                      -> (expr' bool))
+  (Add     : [(expr' int) (expr' int)] -> (expr' int))
+  (Is-zero : (expr' int)               -> (expr' bool)))
 ```
 
 To evaluate a GADT, standard unification variables are insufficient. Standard
@@ -1342,22 +1382,22 @@ allows the compiler to refine the identity of a branch-by-branch based on which
 GADT constructor matched.
 
 ```clojure
-(val eval : (type a) . (exp a) -> a)
+(val eval : (type a) . (expr' a) -> a)
 (val (rec eval) [e] ; Specifiers are a property of the binding not the type.
   (match e
     ;; Inside this branch, `a` is locally refined to `int`.
     (Int n)     n
     ;; Inside this branch, `a` is locally refined to `bool`.
     (Bool b)    b
-    ;; Inside this branch, `(exp a)` refines to `(exp int)`, so `eval` returns
+    ;; Inside this branch, `(expr' a)` refines to `(expr' int)`, so `eval` returns
     ;; `int`.
     (Add [x y]) (+ (eval x) (eval y))
-    ;; Inside this branch, `(exp a)` refines to `(exp bool)`, so `eval` returns
+    ;; Inside this branch, `(expr' a)` refines to `(expr' bool)`, so `eval` returns
     ;; `bool`.
     (Is-zero x) (= (eval x) 0)))
 
-(val safe-exp (Add (Int 5) (Int 10)))
-(eval safe-exp) ; 15
+(val safe-expr' (Add (Int 5) (Int 10)))
+(eval safe-expr') ; 15
 ```
 
 Malformed ASTs are caught at compile time before execution.
@@ -1367,54 +1407,90 @@ Malformed ASTs are caught at compile time before execution.
 ;;                        ^^^^^^^^^^^ Expected (exp int), got (exp bool)
 ```
 
+### 8. Algebraic effects
+
+Algebraic effects decouple the description of an effectful computation from its
+interpretation. When a function performs an effect, it emits an to the
+surrounding environment, leaving an enclosing handler to decide how that request
+is fulfilled. We can divide the types of operation an effect can perform into
+distinct groups:
+
+- **Direct operations:** Tail-resuming, allocation-free operations that return
+  values directly to the perform site. They execute without allocating a
+  continuation and are typed and executed just like normal functions.
+- **Control operations:** Delimited control operations that capture the
+  execution continuation. The continuation can either be resumed once, many
+  times or none at all.
+- **Unwinding final operations:** Explicitly non-resumptive operations that
+  compile down to efficient non-local jumps, where invoking resume is
+  prohibited.
+- **Raw operations:** Unmanaged escape-hatch operations that provide direct
+  access to raw continuation fibers without automatic handler re-installation,
+  designed specifically for building custom green-thread schedulers and
+  concurrency primitives.
+
+Miru's effect system is modeled after the Koka programming language and the
+similarities are canonical.
+
+#### 8.1. Direct operations
+
+Direct operations are used when we want to perform an operation and return a
+value directly to the perform site while having tail-resumption as a guarantee.
+They can resume exactly once and have no access to a continuation because they
+do not allocate one. They are typed and executed exactly like normal functions.
+
+```clojure
+(effect (some-state a)
+  (val get : unit -> a)
+  (val set : a -> unit)) ; They are defined using the `val`-form, just like
+                         ; functions.
+```
+
+Now, we define a function that performs the `some-state` effect. Miru tracks the
+set of effect types as effect rows. They are implemented using row-polymorphism.
+
+```clojure
+(val increment-by : int -> int ! { (some-state int) .. })
+(val increment-by [amount]
+  (val current (get ())) ; Effect performs look exactly like function calls.
+  (set (+ current amount))
+  (get ()))
+```
+
+Now, let's write a handle for the function. It reduces the `some-state` effect
+from the row using row variables.
+
+```clojure
+(val run-some-state : int -> (unit -> int ! { (some-state int) ..e }) -> int ! e)
+(val run-some-state [init action]
+  ;; Introduce the logical region `r` required by `ref`.
+  (with run-state)
+  (var internal-state init)
+
+  ;; The `with`-form installs the effect handler, mapping operations to 
+  ;; the variable `internal-state`.
+  (with (handle
+    (get _) internal-state
+    (set x) (:= x internal-state)))
+
+  ;; Execute the action safely within the handler and region scope.
+  (action ()))
+```
+
+Now, let's call our function.
+
+```clojure
+(let res (run-some-state 10 #(increment-by 5)))
+(println f"{res}") ; 15
+```
+
+In this example, we effectively modeled our own state transformer by composing
+the language primitives.
+
 > [!NOTE]
 > The section below is yet to be serialized properly.
 
 ```clojure
-;; It's about time we introduce algebraic effects. For example, we define a simple
-;; effect with two distinct effect operations. There are different kinds of
-;; effect operation types: direct operations, one-shot controls, non-resuming
-;; operations, muli-shot controls and raw controls. The order is intentional.
-
-(effect (state a)
-  ;; These are examples of direct operations. They are used when we want to
-  ;; perform an operation and return a value directly to the perform site while
-  ;; having tail-resumption as a guarentee. They can resume exactly once and
-  ;; have no access to a continuation because they do not allocate one! They
-  ;; are read and typed exactly like normal functions.
-  (val get : unit -> a) 
-  (val set : a -> unit))
-
-;; Now, we define a function that performs the state effect. Miru tracks the
-;; set of effect types as effect rows. They support row-polymorphism.
-(val increment-by : int -> int ! { (state int) .. })
-(val increment-by [amount]
-  (val current (get ()))
-  (set (+ current amount))
-  (get ()))
-
-;; "!" has a keyword alias too in case we like this better.
-(val increment-by : int -> int performs { (state int) .. })
-
-;; Now, let's write a handle for the function. It reduces the state effect
-;; from the row using row variables.
-(val run-state : int -> (unit -> int ! { (state int) ..e }) -> int ! e)
-(val run-state [init action]
-  (val state (ref init))
-
-  ;; with-expressions allow us to eliminate deeply nested code blocks caused
-  ;; by trailing closures, etc. More concrete examples will follow soon.
-  (with (handle
-    (get _) !state
-    (set x) (:= x state)))
-
-  ;; We can call this function safely.
-  (action ()))
-
-;; #(...) are anonymous functions.
-(let res (run-state 10 #(increment-by 5)))
-(println f"{res}") ; 15
-
 ;; Control operations capture the delimited continuation at the perform site.
 ;; Unlike Koka, control operations default to one-shot resumptions: continuation
 ;; can be called at MOST ONCE (0 times to abort, or 1 time to resume).
