@@ -1411,33 +1411,16 @@ Malformed ASTs are caught at compile time before execution.
 
 Algebraic effects decouple the description of an effectful computation from its
 interpretation. When a function performs an effect, it emits an to the
-surrounding environment, leaving an enclosing handler to decide how that request
-is fulfilled. We can divide the types of operation an effect can perform into
-distinct groups:
-
-- **Direct operations:** Tail-resuming, allocation-free operations that return
-  values directly to the perform site. They execute without allocating a
-  continuation and are typed and executed just like normal functions.
-- **Control operations:** Delimited control operations that capture the
-  execution continuation. The continuation can either be resumed once, many
-  times or none at all.
-- **Unwinding final operations:** Explicitly non-resumptive operations that
-  compile down to efficient non-local jumps, where invoking resume is
-  prohibited.
-- **Raw operations:** Unmanaged escape-hatch operations that provide direct
-  access to raw continuation fibers without automatic handler re-installation,
-  designed specifically for building custom green-thread schedulers and
-  concurrency primitives.
-
-Miru's effect system is modeled after the Koka programming language and the
-similarities are canonical.
+surrounding environment, leaving an enclosing handle to decide how that request
+is fulfilled. Miru's effect system is modeled after the Koka programming
+language and the similarities are canonical.
 
 #### 8.1. Direct operations
 
-Direct operations are used when we want to perform an operation and return a
-value directly to the perform site while having tail-resumption as a guarantee.
-They can resume exactly once and have no access to a continuation because they
-do not allocate one. They are typed and executed exactly like normal functions.
+Direct operations are used to perform an operation and return a value directly
+to the perform site while having tail-resumption as a guarantee. They can resume
+exactly once and have no access to a continuation because they do not allocate
+one. They are typed and executed exactly like normal functions.
 
 ```clojure
 (effect (some-state a)
@@ -1467,152 +1450,235 @@ from the row using row variables.
   (with run-state)
   (var internal-state init)
 
-  ;; The `with`-form installs the effect handler, mapping operations to 
+  ;; The `with`-form installs the effect handle, mapping operations to 
   ;; the variable `internal-state`.
   (with (handle
     (get _) internal-state
     (set x) (:= x internal-state)))
+;;          ^^^^^^^^^^^^^^^^^^^^^ Both of these operations are tail-resumptive.
 
-  ;; Execute the action safely within the handler and region scope.
+  ;; Execute the action safely within the handle and region scope.
   (action ()))
 ```
 
 Now, let's call our function.
 
 ```clojure
-(let res (run-some-state 10 #(increment-by 5)))
+(val res (run-some-state 10 #(increment-by 5)))
 (println f"{res}") ; 15
 ```
 
 In this example, we effectively modeled our own state transformer by composing
 the language primitives.
 
+#### 8.2. Control operations
+
+Control operations are the most general for of operations that capture the
+delimited continuation at the perform site. The continuation can either be
+resumed once, many times or none at all. Let's model lazy iterators for an
+example.
+
+```clojure
+;; We model two states and the suspension using thunks.
+(type (iterator a)
+  Done
+  (Next [a (unit -> (iterator a))]))
+
+(effect (yield a)
+  (control yield : a -> unit))
+;; ^^^^^^^ Control operations use the `control`-form.
+```
+
+Notice that an effect group and an operation can share the same name given it's
+the only operation in that group. This allows us to shorten the definition to a
+single line.
+
+```clojure
+(effect (control yield a) : a -> unit)
+;;      ^^^^^^^^^^^^^^^^^ The `control`-form becomes a specifier.
+```
+
+Now, let's write a function to create the iterator.
+
+```clojure
+(val create-iterator : (unit -> unit ! { (yield a) ..e }) -> (iterator a) ! e)
+(val create-iterator [action]
+  (with (handle
+    (return _) Done
+;;  ^^^^^^^^^^ Return allows us to work with the result right before returning it.
+;;             Here, we discard the value itself, and return the `Done` constructor. 
+    (yield x)  (Next [x #(resume ())])))
+;;                      ^^^^^^^^^^^^ We call the continuation `resume` inside
+;;                                   the thunk, making it lazy.
+
+  (action ()))
+```
+
+And a function to drive the iterators.
+
+```clojure
+(val run-iterator : (iterator int) ! e -> unit ! e)
+(val run-iterator [iter]
+  (match iter
+    (Done) ()
+    (Next [item next]) (begin
+;;        ^^^^^^^^^^^ We get a tuple with the current value and the thunk to
+;;                    get the next value.  
+                         (println f"Yielded: {item}")
+                         (run-iterator (next ())))))
+;;                                     ^^^^^^^^^ We call the thunk here.
+```
+
+And, we're ready to build some examples using our lazy iterators.
+
+```clojure
+(val my-iterator
+  (create-iterator #(begin
+    (yield 1)
+;;  ^^^^^^^^^ These are effectively direct style iterators.
+    (yield 2)
+    (yield 3))))
+
+(run-iterator my-iterator)
+;; Yielded: 1
+;; Yielded: 2
+;; Yielded: 3
+```
+
+This was an example to utilize one-shot continuations. But, control allows us to
+resume a continuations multiple times. Let's model the standard
+non-deterministic choice or the ambiguous flip example. We start by defining a
+simple control operation called `flip`.
+
+```clojure
+(effect (control flip) : unit -> bool)
+```
+
+Now, let's implement a `choices` function that chooses values depending on
+`flip`'s value.
+
+```clojure
+(val choices : int -> int ! flip)
+;;                          ^^^^ Since this function produces only one effect,
+;;                              we don't need to wrap it in an effect row.
+(val choices [x]
+  (if (flip ())
+;;    ^^^^^^^^^ `flip` is only performed once.
+    (+ x 10)
+    (+ x 0)))
+```
+
+And write a handle function for the `flip` effect.
+
+```clojure
+(val handle-flip : (unit -> a ! { flip ..e }) -> (list a) ! e)
+(val handle-flip [action]
+  (with (handle
+    (return v) '(v)
+;;             ^^^^ Return the value of each branch as a list, so we can merge them.
+    (flip ())
+      (<> (resume true) (resume false))))
+;;        ^^^^^^^^^^^^^ ^^^^^^^^^^^^^^ We are resuming the continuation two times and
+;;                                     merging their values (lists).
+
+  (action ()))
+```
+
+Now, we can run a simple example.
+
+```clojure
+(val res (handle-flip #(choices 5)))
+(println f"{res}") ; '(15 5)
+```
+
+All of these examples made use of a deep handle. It automatically re-installs
+itself around its continuation whenever an operation is intercepted. We'll look
+into shallow handles in future chapters.
+
+#### 8.3. Final operations
+
+Final operations are explicitly non-resumptive operations i.e. they capture a
+continuation just to discard it completely. They compile down to efficient
+non-local jumps, where invoking resume is prohibited. They are a structural
+generalization of exceptions, offering the same fast stack-unwinding behavior
+without forcing a specific error type. Consequently, they are very well-suited
+for modeling traditional exception systems, early-exit loops, and
+short-circuiting searches. Let's model them.
+
+```clojure
+(effect (exn e)
+  (final throw : e -> a))
+;;                    ^ The output must be generic.
+;; ^^^^^ We use the `final`-form to define final operations.
+```
+
+Let's write a simple function to validate age brackets.
+
+```clojure
+(val parse-age : int -> int ! { (exn string) })
+(val parse-age [age]
+  (if (< age 0)
+    (throw "Age can't be negative")
+    age))
+```
+
+And a handle function to encode the effect into a `maybe` monad.
+
+```clojure
+(val handle-exn : (unit -> a ! { (exn string) ..e }) -> (maybe a) ! e)
+(val handle-exn [action]
+  ; If we want to handle just one operation, we don't need to use
+  ; the handle form. This is a neat shortcut.
+  (with (throw err)
+    (println f"Caught error: {err}")
+    Nothing) ; We can't resume here.
+  
+  (Just (action ())))
+```
+
+And an example to go with it.
+
+```clojure
+(val res (handle-exn #(parse-age -5)))
+(println f"{res}") ; Nothing
+```
+
+#### 8.4. Raw operations
+
+Raw operations are unmanaged escape-hatches that provide direct access to raw
+continuation fibers without automatic handle re-installation (often called a
+shallow handle), designed specifically for building custom green-thread
+schedulers and concurrency primitives. Let's reimplement the iterator example,
+but this time with a `raw` yield. We're going to reuse the `iterator` data type.
+
+```clojure
+(effect (raw yield a) : a -> unit)
+;;      ^^^^^^^^^^^^^ We use the `raw` specifier.
+```
+
+And the `create-iterator` function.
+
+```clojure
+(val create-iterator : (unit -> unit ! { (yield a) ..e }) -> (iterator a) ! e)
+(val create-iterator [action]
+  (with (handle
+    (return _) Done
+    [(yield x) context]
+;;  ^^^^^^^^^^^^^^^^^^^ Raw operations pass their raw context along.
+      (Next [x #(context/resume ())])))
+;;             ^^^^^^^^^^^^^^^^^^^^ We must use the `resume` from the context.
+
+  (action ()))
+```
+
+Raw operations do not automatically finalize the execution path. All the
+`(context/finalize ())` calls must be done manually. Consequently, it's possible
+to leak memory if we are not careful, though it remains entirely memory safe.
+
 > [!NOTE]
 > The section below is yet to be serialized properly.
 
 ```clojure
-;; Control operations capture the delimited continuation at the perform site.
-;; Unlike Koka, control operations default to one-shot resumptions: continuation
-;; can be called at MOST ONCE (0 times to abort, or 1 time to resume).
-
-;; Lets model interators by modeling the states.
-(type (iterator a)
-  (Done)
-  (Next [a (unit -> (iterator a))]))
-
-;; Now, a control operation to yield values.
-(effect (yield a)
-  (control yield : a -> unit))
-
-;; Lets define the main iterate function.
-(val iterate : (unit -> unit ! { (yield a) ..e }) -> (iterator a) ! e)
-(let iterate [action]
-  (with (handle
-    (return _) (Done)
-    (yield x)  (Next [x #(resume ())])))
-  (action ()))
-
-;; And a function that produces some result.
-;; NOTE: When sending the entire row, we don't need { ..<id> } and can
-;; rather collapse it into an <id>.
-(val run-print : (iterator int) ! e -> unit ! e)
-(let run-print [iter]
-  (match iter
-    (Done) ()
-    (Next [item next]) (begin (println f"Yielded: {item}")
-                              (run-print (next ())))))
-
-;; Build the iterator.
-(let my-iterator
-  (iterate #(begin
-    (yield 1)
-    (yield 2)
-    (yield 3))))
-
-;; And run it:
-(run-print my-iterator)
-;; Yielded: 1
-;; Yielded: 2
-;; Yielded: 3
-
-;; A final control is explicitly non-resumptive; invoking resume inside its handle
-;; causes a compile-time error. This allows the compiler to optimize the operation
-;; as a non-local jump.
-
-;; For example, we can model exceptions using final controls.
-(effect (exn e)
-  (final throw : e -> a))
-
-(val parse-age : int -> int ! { (exn string) })
-(let parse-age [age]
-  (if (< age 0)
-    (throw "Age can't be negative")
-    age))
-
-;; A simple example to turn exceptions into maybes.
-(val run-exn : (unit -> a ! { (exn string) ..e }) -> (maybe a) ! e)
-(let run-exn [action]
-  (with (throw err)
-    (println f"Caught error: {err}")
-    (Nothing)) ; We can't resume here.
-  
-  (Just (action ())))
-
-(let res1 (run-exn #(+ (parse-age -5) 100)))
-(println f"{res1}") ; Nothing
-
-;; Multi-shot effects are opt-in at the effect level using the `multi` modifier.
-;; Because multi-shot operations clone stack frames and data contexts to preserve 
-;; purity across branches, marking the entire effect as `multi` signals to the compiler
-;; that stack-cloning machinery is required.
-(effect (multi amb)
-  ;; Now this control has multi-shot capabilities.
-  (control flip : unit -> bool))
-
-;; Because it performs a multi-shot effect, this branch will evaluate and
-;; return multiple times during handling.
-(val choices : int -> int ! { amb })
-(let choices [x]
-  (if (flip ())
-    (+ x 10)
-    (+ x 0)))
-
-;; Handler for non-deterministic choice using `with`. Aditionally, handles handling any
-;; effect can use a `return` clause (value clause) to wrap values if needed.
-(val handle-amb : (unit -> a ! { amb ..e }) -> (list a) ! e)
-(let handle-amb [action]
-  (with (handle
-    (return v) ::(v) ; Wrap the normal completion result in a list.
-    (flip ())  (<> (resume true) (resume false)))) ; Combine the results of both forks.
-
-  (action ()))
-
-(let res (handle-amb #(choices 5)))
-(println f"{res}") ; ::(15 5)
-
-;; Raw controls provide unmanaged, direct access to the raw underlying continuation 
-;; fiber without automatically re-installing the enclosing handler scope upon resumption. 
-;; This is the escape hatch used to implement low-level concurrency primitives, 
-;; custom green-thread schedulers, or delimited control operators like shift/reset.
-;; Let's reimplement the interate function from the "control" example:
-
-;; Now, a control operation to yield values.
-(effect (yield a)
-  (raw yield : a -> unit))
-
-(val iterate : (unit -> unit ! { (yield a) ..e })
-            -> (iterator a)  ! e)
-(let iterate [action]
-  (with (handle
-    (return _) (Done)
-    [(yield x) context] ; Raw controls pass their raw context.
-      (Next [x #(context/resume ())]))) ; We need to resume FROM the context.
-  (action ()))
-
-;; Raw controls do not automatically finalize the execution path. We have to take
-;; the responsibility onto ourselves i.e. ((.finalize context) ()). Raw controls
-;; can be multi-shot but requires effect group annotation similar to controls. 
-
 ;; Let's take a bit of time to understand the with-expression. Here are some
 ;; cases. First is the case for a scoped resource manager.
 (let count-steps [()]
