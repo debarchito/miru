@@ -232,7 +232,7 @@ Currying makes composition clean and natural. In this example, `(* 2)` wraps a
 lambda that expects a second argument.
 
 ```clojure
-(val new-list (map (* 2) '(1 2 3 4))) ; '(2 4 6 8)
+(val new-list (List/map (* 2) '(1 2 3 4))) ; '(2 4 6 8)
 ```
 
 #### 2.5. Type annotations
@@ -951,19 +951,32 @@ record into another introduces the risk of silent field masking. If a source
 record carries an unexpected field within its row variable `..`, explicitly
 adding a field with the same name after the splat will shadow the hidden value.
 This can cause down-stream semantic bugs if subsequent consumers expect the
-hidden value's original configuration. To prevent this, Miru introduces _Lack
-Constraints_ using the strict conditional row syntax `..<id> \ {<field> ...}`:
-the row variable `p` is mathematically guaranteed to lack the specified field.
+hidden value's original configuration.
+
+To prevent this, Miru introduces polarity constraints (or polarities) using the
+refinement syntax `..<id> | {<field> ...}`. Elements by default always carry the
+_presence_ polarity while the _absence_ polarity can be introduced using
+`-<field>`. Polarities are inert and do not require a special solver; they unify
+like normal elements and only cause a unification error when trying to unify
+with their opposite polarity.
+
+In this example, the row variable `p` is mathematically guaranteed to lack the
+fields `a`, `b` and `c`.
 
 ```clojure
-(val transform : { ..p \ {a b c} } -> { a int, b string, c boolean, ..p })
+(val transform : { ..p | {-a -b -c} } -> { a int, b string, c boolean, ..p })
+;;               ^^^^^^^^^^^^^^^^^^^^ The constraint is on the input.
 (val transform [input]
-  { input.., a 10, b "meta", c true })
+  { a 10, b "meta", c true, input.. })
+;;                          ^^^^^^^ Splating is safe because `input` is an
+;;                                  ordinary structural record that just
+;;                                  happened to not have fields `a`, `b` and
+;;                                  `c`. It doesn't carry any proofs with it
+;;                                  at runtime.
 ```
 
-In this example, `transform` safely adds new fields to an open-ended record
-while statically guaranteeing those fields do not already exist in the input,
-preventing silent overrides.
+`transform` safely adds the fields `a`, `b` and `c` to the open-ended record
+while preventing silent overrides.
 
 #### 6.6. Mutable fields
 
@@ -1231,6 +1244,112 @@ Consequently, the `exposes`-form mirrors top-level definitions. This is
 intentional because it reflects how modules are implemented in Miru; at their
 core, they are just structural records coupled with fancier syntax and an
 additional ability to control encapsulation inside-out.
+
+#### 6.12. Applicative and generative functors
+
+Let's start by revisiting the `ORD` example, and implementing an additional
+`SORTER` interface.
+
+```clojure
+(type ORD
+  (sig
+    (type t)
+    (val compare : t -> t -> bool)))
+
+(type SORTER
+  (sig
+    (type t)
+    (val sort : (list t) -> (list t))))
+```
+
+Let's write a generic sorting function that uses the `compare` function.
+
+```clojure
+(val sort-generic : (a -> a -> bool) -> (list a) -> (list a))
+(val sort-generic [compare lst]
+  (val (rec insert) [x xs]
+    (match xs
+      '()       '(x)
+      (:: y ys) (if (compare x y)
+                  (:: x (:: y ys))
+                  (:: y (insert x ys)))))
+  (foldr insert '() lst))
+;;              ^^^^^^^ The data last semantics hold here too.
+```
+
+Now, let's define a functor that takes in a module that implements `ORD`. Given
+modules are first-class in Miru, functors are just simple functions.
+
+```clojure
+(val Make-sorter : (ORD (type t a)) -> (SORTER (type t a)))
+;;                      ^^^^^^^^^^             ^^^^^^^^^^
+;;                 We define a path dependent constraint, making this functor
+;;                 applicative.
+(val Make-sorter [M]
+  (struct
+    (type t M/t)
+    (val sort #(sort-generic M/compare %))))
+```
+
+This can get extremely tedious when multiple path dependent constraints must be
+defined at the same time. In such cases, we can use the path threaded mapping
+`=>`. It automatically tracks and resolves path dependent constraints, making
+annotations a lot easier to write and reason about.
+
+```clojure
+(val Make-sorter : ORD => SORTER)
+(val Make-sorter [M]
+  (struct
+    (type t M/t)
+    (val sort #(sort-generic M/compare %))))
+```
+
+Now, let's create two instances for sorting integers in ascending and descending
+order. To revise, explicit coercion is required to bind a structural record to a
+principal type.
+
+```clojure
+(val Int-asc :> (ORD (type t int)))
+;;              ^^^^^^^^^^^^^^^^^^ Equivalent to `ORD with t = int` in OCaml.
+(val Int-asc (struct
+               (type t int)
+               (val compare #(<= %1 %2))))
+
+(val Int-desc :> (ORD (type t int)))
+(val Int-desc (struct
+                (type t int)
+                (val compare #(>= %1 %2))))
+```
+
+We can use the functor to get our sorter implementations.
+
+```clojure
+(val Int-asc-sorter-1 (Make-sorter Int-asc))
+(val Int-asc-sorter-2 (Make-sorter Int-asc))
+;; Int-asc-sorter-1/t = Int-asc-sorter-2/t
+(val Int-desc-sorter (Make-sorter Int-desc))
+```
+
+We can also build generative functors by removing the path dependent constraint.
+
+```clojure
+(val Make-sorter-gen : ORD -> SORTER)
+;;                     ^^^^^^^^^^^^^ Abstract to abstract makes use of type
+;;                                   witness, making this functor generative. 
+(val Make-sorter-gen [M]
+  (struct
+    (type t M/t)
+    (val sort #(sort-generic M/compare %))))
+```
+
+When we use our new functor, the type `t` is minted uniquely for each call
+making them different. These two are not compatible:
+
+```clojure
+(val Int-asc-sorter-1 (Make-sorter-gen Int-asc))
+(val Int-asc-sorter-2 (Make-sorter-gen Int-asc))
+;; Int-asc-sorter-1/t != Int-asc-sorter-2/t
+```
 
 ### 7. Within sum types
 
@@ -1675,174 +1794,154 @@ Raw operations do not automatically finalize the execution path. All the
 `(context/finalize ())` calls must be done manually. Consequently, it's possible
 to leak memory if we are not careful, though it remains entirely memory safe.
 
+### 9. The `with`-form.
+
+We've been using it a lot. So, let's take a bit of our time to understand the
+`with`-form. Here are some examples.
+
+```clojure
+(let count-steps [()]
+  (scoped 0
+    #(begin
+       (:= (+ !% 1) %)
+       (:= (+ !% 2) %)
+       !%)))
+```
+
+We can address the nesting using the `with`-form, which allows us to eliminate
+deeply nested code blocks caused by trailing closures. It is essentially a scope
+re-writer.
+
+```clojure
+(let count-steps [()]
+  (with s (scoped 0))
+
+  ; Everything that follows is re-written into a lambda by the reader.
+  (:= (+ !s 1) s)
+  (:= (+ !s 2) s)
+  !s)
+```
+
+`with`-form also defines special interactions with `handle`s and `provide`s,
+making them really nice to work with.
+
+```clojure
+(with (handle
+  (emit msg) (begin
+               (println f"{msg}")
+               (resume ()))))
+
+(emit "1st!")
+(emit "2nd")
+```
+
+Without `with`-form, it would devolve into nested scopes.
+
+```clojure
+(handle
+  (emit msg) (begin
+               (println f"{msg}")
+               (resume ()))
+  #(begin
+     (emit "1st!")
+     (emit "2nd"))) ; This will get very tedious with nested handles.
+```
+
+### 10. Algebraic Co-effects
+
+Miru implement two forms of co-effects: _flat_ (also called `contexts`) and
+_structural_ (also called `modes`). A context tracks ambient environment
+requirements as a single, global record shared across the entire computation,
+whereas a structural co-effect tracks resource properties or usage constraints
+individually for each specific variable in the context. So tracking properties
+like linearity, portability, contention, locality etc. are what makes structural
+co-effects very powerful. Miru tracks structural co-effects very similar to
+modaities found in OxCaml (Jane Street's OCaml fork). Unlike flat co-effects,
+structural co-effects do not make use of row-polymorphism but modality lattices.
+Let's unpack them one by one.
+
+#### 10.1. Contexts
+
+To put it simply, contexts act as the ambient arguments of a function. These
+parameters are implicitly expected by the function's execution environment and
+are threaded automatically by the compiler. By abstracting away manual argument
+passing, contexts provide an very clean and elegant primitive for type-directed
+dependency injection. They are deeply intertwined with the module system and for
+very good reasons. Let's start by implementing a `SHOW` signature.
+
+```clojure
+(type SHOW
+  (sig
+    (type t)
+    (val show : t -> string)))
+```
+
+Miru tacks contexts using `? { ... }` row. Just like effects, contexts support
+row-polymorphism. We can also define a local alias for a context using the
+rebind operator `<~`.
+
+```clojure
+(val print-show : a ? { S <~ (SHOW (type t a)) .. } -> unit)
+(val print-show [x]
+  (println (f"Printing {}!" (?S/show x))))
+;;                           ^^ `?<id>` is how we read from the context row.
+```
+
+Let's dissect the signature. We define an abstract type `a` and take an argument
+of type `a` that demands an instance in it's environment that implements the
+`SHOW` signature with its abstract type `t` equating to `a`. Just like `sig` and
+`struct`-forms, Miru provides a `row`-form to neatly type polymorphic rows when
+making heavy use of rebinds. Thus, the signature could also be written as:
+
+```clojure
+(val print-show : a ? (row (val S (SHOW (type t a)))) -> unit)
+```
+
+It functionally replaces `{ ... }` with `(row ...)` and the rebind operator `<~`
+with the well-defined `val`-form.
+
+Let's implement the `SHOW` signature for integers and lists.
+
+```clojure
+(val Show-int :> SHOW)
+(val Show-int (struct
+                (type t int)
+                (val show #(Int/into-string %))))
+
+(val Show-list : SHOW => SHOW)
+(val Show-list [S]
+  (struct
+    (type t (list S/t))
+    (val show #(String/from-format
+                 (f"list({})" (List/join " " (List/map S/show %)))))))
+```
+
+We can't pass the modules or functors directly to the `print-show` function; it
+expects them to ambiently available in the environment. This is where we use the
+`provide`-form.
+
+```clojure
+(with (provide { Show-int, .. }))
+(print-show 4) ; Printing 4!
+
+(with (provide { (Show-list Show-int), .. }))
+(print-show '(1 2 3)) ; Printing list(1 2 3)!
+```
+
+Beyond simple lookups, Miru’s context engine acts as a Horn clause solver. When
+a function requires a context that depends on other types (such as `Show-list`
+needing a `SHOW` instance for its element type), the compiler performs backward
+chaining to logically derive the demand for the unspecified instance.
+
+```clojure
+(with (provide { Show-int, Show-list, .. }))
+(print-show '(1 2 3)) ; Printing list(1 2 3)!
+```
+
 > [!NOTE]
 > The section below is yet to be serialized properly.
 
 ```clojure
-;; Let's take a bit of time to understand the with-expression. Here are some
-;; cases. First is the case for a scoped resource manager.
-(let count-steps [()]
-  (scoped 0
-    #(begin
-      (:= (+ !% 1) %)
-      (:= (+ !% 2) %)
-      !%)))
-
-;; That's a lot of nesting. Now let's rewrite it with with-expression.
-;; This makes the code very linear. with-expression takes advantage of the
-;; fact that Miru functions auto-curry and rewrite the scope for us.
-(let count-steps [()]
-  (with s (scoped 0))
-  (:= (+ !s 1) s)
-  (:= (+ !s 2) s)
-  !s)
-
-;; This is also the property that makes handles much easier to write.
-(with
-  (handle
-    (emit msg)
-      (begin
-        (println f"{msg}")
-        (resume ()))))
-
-(emit "1st!")
-(emit "2nd")
-
-;; Would otherwise be something closer to:
-(handle
-  (emit msg)
-    (begin
-      (println f"{msg}")
-      (resume ()))
-  #(begin
-    (emit "1st!")
-    (emit "2nd"))) ; This will get very tedious with nested handles.
-
-;; Miru implement two forms of coeffects: flat (contexts) and structural (modes).
-;; A flat coeffect tracks ambient environment requirements as a single, global record
-;; shared across the entire computation, whereas a structural coeffect tracks resource
-;; properties or usage constraints individually for each specific variable in the context.
-;; So tracking properties like linearity, portability, contention, locality etc. are what
-;; makes structural coeffects very powerful. Miru tracks structural coeffects very similar
-;; to modaities found in OxCaml (Jane Street's Oxidized OCaml fork). Unlike flat coeffects,
-;; structural coeffects do not make use of row-polymorphism but modality lattices.
-
-;; Contexts are intertwined with the "module" system which in turn surface as modular implicits
-;; and explicits. Let's look at an example by defining a "module" type.
-
-;; Module types are record types. By convention, they are always in UPPERCASE.
-(type ORD
-  { (type t) . ; We can define abstract types here and use them in the record body.
-    compare : t -> t -> int, .. }) ; They need to be structural to enable subtyping.
-
-;; Let's write a storing function.
-(val sort-generic : (type t) . (t -> t -> bool) -> (list t) -> (list t))
-(let sort-generic [compare lst]
-  (let (rec insert) [x xs]
-    (match xs
-      ::()      ::(x)
-      (:: y ys) (if (compare x y)
-                  (:: x (:: y ys))
-                  (:: y (insert x ys)))))
-  (foldr insert ::() lst))
-
-;; Functors are just normal functions. Notice the sorting interface is stuctural.
-;; But we could make it a separate type too. By conventions, modules and functors
-;; are Header-cased.
-(val Make-sorter : ORD -> { (type t) . sort : (list t) -> (list t), .. })
-(let Make-sorter [M]
-  { (type t = M/t) .
-    sort #(sort-generic M/compare %), .. })
-
-;; Let's create our "modules".
-(let Int-asc { (type t = int) .
-               compare #(<= %1 %2) })
-
-(let Int-desc { (type t = int) .
-               compare #(>= %1 %2) })
-
-;; And now, we can use the functor.
-(let Int-asc-sorter (Make-sorter Int-asc))
-(let Int-desc-sorter (Make-sorter Int-desc))
-
-;; Functors are applicative by default similar to OCaml. Thus Miru also inherits
-;; OCaml's convention of using unit to define generative functors syntactically.
-;; This is less about semantic clarity and more about a pragmatic middle ground.
-(val Make-sorter-gen : ORD -> unit -> { (type t) . sort : (list t) -> (list t), .. })
-(let Make-sorter-gen [M ()]
-  { (type t = M/t) .
-    sort #(sort-generic M/compare %), .. })
-
-;; Now, we can use our new functor. Unlike OCaml, Miru doesn't force we to curry
-;; the unit call because functors are normal functions. The type t is minted uniquely
-;; for each call making them different hence generative.
-(let Int-asc-sorter-gen (Make-sorter-gen Int-asc)) ; Curried!
-(let One (Int-asc-sorter-gen ()))
-(let Two (Int-asc-sorter-gen ())) ; One and Two are not equivalent.
-
-;; We define a type the context needs to supply.
-(type SHOW
-  { (type t) .
-    show : t -> string, .. })
-
-;; Miru tracks contexts using a question `?`. Just like effect, contexts
-;; support row-polymorphism. We provide a name to the context payload
-;; (which is a module in this case) using <~.
-(val print-blank : S/t ? { S <~ SHOW .. } -> unit)
-(let print-blank [x]
-  (let S ?S) ; ?<id> is how we read from the context row.
-  (println (f"{}" (S/show x))))
-
-;; We could also write the signature as:
-(val print-blank : (type a) .
-                   a ? { S <~ (SHOW ~> (type t = a)) .. } -> unit)
-;; <~ is formally called a flat binding while ~> is called a structural binding.
-
-;; Similar to effects, coeffects also have keyword aliases.
-(val print-blank : (type a) in
-                   a demands { S as (SHOW with (type t = a)) .. } -> unit)
-;; To note, these keyword aliases are no way related to the (<keyword> ...)
-;; forms if any.
-
-;; Let's implement a module for integers first.
-(let Show-int { (type t = int) .
-                show #(Int/to-string %) })
-
-;; It naturally can also be written as:
-(let Show-int { (type t = int) in
-                show #(Int/to-string %) })
-
-;; And another for lists, using a functor.
-(val Show-list : SHOW -> SHOW)
-(let Show-list [S]
-  { (type t = (list S/t)) .
-    show #(format-to-string (f"list({})" (join " " (map S/show %)))) })
-
-;; This is how we would provide them when named:
-(with (provide { S <~ Show-int }))
-(print-blank 4) ; 4
-
-(with (provide { S <~ (Show-list Show-int) }))
-(print-blank ::(1 2 3)) ; list(1 2 3)
-
-;; We can actually skip the name too, and it will try to resolve using
-;; type-direction!
-(with (provide { (Show-list Show-int) }))
-(print-blank ::(1 2 3)) ; list(1 2 3)
-
-;; Named contexts are useful when we have numerous contexts of the same type in demand.
-;; Miru prefers explicit resolution but that doesn't mean implicit resolution is not
-;; supported. Use them wisely and partly for trivial purposes.
-
-;; Mark the type as implicit.
-(val print-blank : S/t ? { S <~ (implicit SHOW) .. } -> unit)
-(let print-blank [x]
-  (println (f"{}" (?S/show x)))) ; We can also use ?<id> directly.
-
-;; Now, the compiler will perform scope resolution for us.
-(print-blank 4) ; 4
-(print-blank ::(1 2 3)) ; list(1 2 3)
-
 ;; A flat coeffect tracks ambient environment requirements as a single, global record
 ;; shared across the entire computation, whereas a structural coeffect tracks resource
 ;; properties or usage constraints individually for each specific variable in the context.
