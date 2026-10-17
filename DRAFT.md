@@ -269,6 +269,13 @@ compiler to infer using type holes `_`.
   (* a b))
 ```
 
+Alternatively, we can also annotate the binding inline.
+
+```clojure
+(val (multiply : _ -> _ -> int) [a b]
+  (* a b))
+```
+
 Type holes are not just limited to concrete types, they can infer effects,
 contexts and modalities while setting defaults for refinement predicates. Any
 unannotated component acts as an implicit type hole, allowing us to specify only
@@ -1858,9 +1865,9 @@ like linearity, portability, contention, locality etc. are what makes structural
 co-effects very powerful. Miru tracks structural co-effects very similar to
 modaities found in OxCaml (Jane Street's OCaml fork). Unlike flat co-effects,
 structural co-effects do not make use of row-polymorphism but modality lattices.
-Let's unpack them one by one.
+Let's unpack them one by one, in their respective sections.
 
-#### 10.1. Contexts
+### 11. Contexts
 
 To put it simply, contexts act as the ambient arguments of a function. These
 parameters are implicitly expected by the function's execution environment and
@@ -1938,18 +1945,82 @@ chaining to logically derive the demand for the unspecified instance.
 (print-show '(1 2 3)) ; Printing list(1 2 3)!
 ```
 
+### 12. Modalities
+
+Modalities or modes define the structural constraints carried by a particular
+value. This includes properties like linearity (if a value can be used multiple
+times), uniqueness (if a value can be held uniquely), locality (if a value is
+local to a scope), among others. Each of these properties are their own temporal
+axes: they either define what already happened in the past, or what can happen
+in the future. Unlike effects and contexts, modalities do not use
+row-polymorphism, but use graded modal calculus using an ordered semiring.
+Miru's modalities take heavy inspiration from Jane Street's work on OxCaml.
+
+#### 12.1. Linearity
+
+Values can either be linearly `once` or `many`. A `once` value, can't be copied,
+cloned or borrowed. Their ownership can only be moved or consumed.
+
+```clojure
+(val x "Hello") ; Values by default are always `many`.
+```
+
+Modes can be introduced using various ways. The easiest way is to use the
+`val`-annotation form and the `@ [ ... ]` mode tuple.
+
+```clojure
+(val x : string @ once)
+;;                ^^^^ When using only one mode, `[ ... ]` isn't required.
+(val x "Hello")
+```
+
+Or, inlining them to the binding name is always a possibility.
+
+```clojure
+;; Just specify the mode and let the compiler do the rest of the inference.
+(val (x @ once) "Hello")
+```
+
+This example implements a one-time cryptographic handshake token. Once the token
+is used to authenticate, it must be consumed so it can never be reused or
+leaked.
+
+```clojure
+;; Function that consumes a linear token.
+(val auth : token @ once -> string)
+(val auth [t]
+  (Crypto/verify-and-burn t))
+;; ^^^^^^^^^^^^^^^^^^^^^^ This is some random function that consumes `t`.
+
+;; Function that takes an unrestricted value.
+(val log-attempt : string -> unit)
+(val log-attempt [msg]
+  (println (f"Auth attempted with message: {}" msg)))
+```
+
+Let's define a message and try calling the second function multiple times.
+
+```clojure
+(val msg "Initiating Handshake")
+(log-token-attempt msg) ; Works fine
+(log-token-attempt msg) ; Still fine because `msg` is `many` by default.
+```
+
+Let's try the same but for the linear function.
+
+```clojure
+;; Let's mint some token.
+(val (token @ once) (Crypto/generate-token ()))
+(val auth-status-1 (authenticate token)) ; Works
+(val auth-status-2 (authenticate token))
+;;                               ^^^^^ ERROR: `token` is defined as `once`
+;;                                     and it was already consumed.
+```
+
 > [!NOTE]
 > The section below is yet to be serialized properly.
 
 ```clojure
-;; A flat coeffect tracks ambient environment requirements as a single, global record
-;; shared across the entire computation, whereas a structural coeffect tracks resource
-;; properties or usage constraints individually for each specific variable in the context.
-;; So tracking properties like linearity, portability, contention, locality etc. are what
-;; makes structural coeffects very powerful. Miru tracks structural coeffects very similar
-;; to modaities found in OxCaml (Jane Street's Oxidized OCaml fork). Unlike flat coeffects,
-;; structural coeffects do not make use of row-polymorphism but modality lattices.
-
 ;; The uniqueness axis: a value is either @unique (exactly one live
 ;; reference) or the default, shared.
 (begin
