@@ -1290,12 +1290,18 @@ modules are first-class in Miru, functors are just simple functions.
 ```clojure
 (val Make-sorter : (ORD (type t a)) -> (SORTER (type t a)))
 ;;                      ^^^^^^^^^^             ^^^^^^^^^^
-;;                 We define a path dependent constraint, making this functor
-;;                 applicative.
+;; We define a path dependent constraint, making this functor
+;; applicative.
 (val Make-sorter [M]
   (struct
     (type t M/t)
     (val sort #(sort-generic M/compare %))))
+```
+
+The signature can also be written as:
+
+```clojure
+(val Make-sorter : (val M : ORD) -> (SORTER (type t M/t)))
 ```
 
 This can get extremely tedious when multiple path dependent constraints must be
@@ -1349,8 +1355,23 @@ We can also build generative functors by removing the path dependent constraint.
     (val sort #(sort-generic M/compare %))))
 ```
 
-When we use our new functor, the type `t` is minted uniquely for each call
-making them different. These two are not compatible:
+Or, more concretely in 1ML terms, we seal the struct. Here is an inline
+annotation version of what's actually happening.
+
+```clojure
+(val Make-sorter-gen [(val M : ORD)]
+  (val (struct
+         (type t M/t)
+         (val sort #(sort-generic M/compare %))) :> SORTER))
+;;             It's an explicit coercion indeed! ^^
+```
+
+Generativity is not an inherent property of the functor's evaluation, but a
+consequence of coercion/sealing that actively severs the internal type path at
+the module boundary.
+
+Thus, the type `t` is minted uniquely for each functor call, making them
+different.
 
 ```clojure
 (val Int-asc-sorter-1 (Make-sorter-gen Int-asc))
