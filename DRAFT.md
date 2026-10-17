@@ -269,13 +269,6 @@ compiler to infer using type holes `_`.
   (* a b))
 ```
 
-Alternatively, we can also annotate the binding inline.
-
-```clojure
-(val (multiply : _ -> _ -> int) [a b]
-  (* a b))
-```
-
 Type holes are not just limited to concrete types, they can infer effects,
 contexts and modalities while setting defaults for refinement predicates. Any
 unannotated component acts as an implicit type hole, allowing us to specify only
@@ -288,19 +281,9 @@ for inline annotations, which are permitted in two specific positions:
 We can annotate inline parameters and expressions with concrete types by reusing
 the exact same `val`-annotation format we use at the top level. Just like with
 default values, reusing the annotation form here preserves grammar uniformity
-and eliminates the need for a separate, specialized reader macro.
-
-This extends naturally to universal quantifiers, abstract types, effects,
-contexts, modalities, and refinements. A quick reference follows:
-
-- **Arbitrary expressions:** `(val <expr> : <type>)`
-- **Identifier lookups:** `(val ^<id> : <type>)`
-- **Universal quantifiers:** `(val <id> : (forall a) . <type>)`
-- **Abstract types:** `(val <id> : (type a) . <type>)`
-- **Effects:** `(val <id> ! { ... })`
-- **Contexts:** `(val <id> ? { ... })`
-- **Modalities:** `(val <id> @ { ... })`
-- **Refinements:** `(val <id> : <type> | <predicate>)`
+and eliminates the need for a separate, specialized reader macro. This extends
+naturally to universal quantifiers, abstract types, effects, contexts,
+modalities, and refinements.
 
 ```clojure
 (val multiply [(val a : int) b]
@@ -340,6 +323,7 @@ argument, effectively calling the function only for its side effects.
    (hello-world)
 ;; ^^^^^^^^^^^^^ SYNTAX ERROR: Invalid placement of strings tags or
 ;;               an illegal function call with no arguments.
+;
 ```
 
 We'll look into how Miru tracks side-effects in its type system in later
@@ -843,7 +827,8 @@ the lookup operator `^`.
 ;;                           and return the coerced value in place.
 ```
 
-Coercions can also be written using the `val`-annotation form.
+Coercions can also be written using the `val`-annotation form and the explicit
+coercion operator `:>`.
 
 ```clojure
 (val s2 :> session)
@@ -898,11 +883,10 @@ field binding operator `~`.
 (val record { ~id, .. }) ; Identical to { id id, .. } i.e. { id "value", .. }.
 ```
 
-When matching against a record, we can use the rebind operator `<~` to rebind
-field names. The syntax follows `<new> <~ <old>`.
+When matching against a record, we can use the rebind field names using `=`.
 
 ```clojure
-(val { field <~ id, .._ } record) ; This is a form of pattern matching.
+(val { id = field, .._ } record) ; This is a form of pattern matching.
 (println f"{field}") ; value
 ```
 
@@ -960,9 +944,9 @@ adding a field with the same name after the splat will shadow the hidden value.
 This can cause down-stream semantic bugs if subsequent consumers expect the
 hidden value's original configuration.
 
-To prevent this, Miru introduces polarity constraints (or polarities) using the
-refinement syntax `..<id> | {<field> ...}`. Elements by default always carry the
-_presence_ polarity while the _absence_ polarity can be introduced using
+To prevent this, Miru introduces polarity constraints (or polarities) using row
+variables refinements `..<id> | {<field> ...}`. Elements by default always carry
+the _presence_ polarity while the _absence_ polarity can be introduced using
 `-<field>`. Polarities are inert and do not require a special solver; they unify
 like normal elements and only cause a unification error when trying to unify
 with their opposite polarity.
@@ -1087,9 +1071,9 @@ required to satisfy and discharge these effects.
   { name : string, (mut r age) : int })
 
 ;; The syntax for effects will be explored in detail in later chapters. Effects
-;; are annotated using the row notation `! { ... }` or simplified to  `! <effect>`
+;; are annotated using `{ eff, eff2 .. } value` or simplified to `effect value`
 ;; when a function performs a single effect, which in this case is `(state r)`.
-(val birthday : (person r) -> unit ! (state r))
+(val birthday : (person r) -> (state r) unit)
 (val birthday [p]
   (<- (+ p/age 1) p/age))
 
@@ -1150,9 +1134,9 @@ rewrite the `session` type structurally:
     (val id : string)
     (val name : string)))
 
-;; Coercion is required as structural records do not unify with principal
-;; types automatically, preserving decidable unification.
-(val first :> session)
+;; Structural records do not unify with principal types automatically,
+;; preserving decidable unification.
+(val first : session)
 (val first
   (struct
     (val id "Miru")
@@ -1162,7 +1146,7 @@ rewrite the `session` type structurally:
 (type session
   { id : string, name : string, .. })
 
-(val first :> session)
+(val first : session)
 (val first { id "Miru", name "The first session", .. })
 ```
 
@@ -1187,7 +1171,7 @@ generative functors.
   { (type t) ; Records can hold abstract types.
     compare : t -> t -> int })
 
-;; Or, we could use the `sig`-form.
+;; Or, we can use the `sig`-form.
 (type ORD
   (sig
     (type t)
@@ -1204,7 +1188,7 @@ consuming unspecified fields to control visibility.
   (sig
     (val greet : unit -> string)))
 
-(val second :> session)
+(val second : session)
 (val second
   (struct
     ;; The `id` field is not accessible outside because the `session` type
@@ -1229,7 +1213,7 @@ but inside-out. This can only be used inside `sig` and `struct`-forms.
     (val id : string)
     (val greet : unit -> string)))
 
-(val second :> session)
+(val second : session)
 (val second
   (struct
     ;; The `id` field is still not accessible outside.
@@ -1288,23 +1272,28 @@ Now, let's define a functor that takes in a module that implements `ORD`. Given
 modules are first-class in Miru, functors are just simple functions.
 
 ```clojure
-(val Make-sorter : (ORD (type t a)) -> (SORTER (type t a)))
-;;                      ^^^^^^^^^^             ^^^^^^^^^^
-;;                 We define a path dependent constraint, making this functor
-;;                 applicative.
+(val Make-sorter : (val M : ORD) -> (SORTER (type t M/t)))
+;;                 ^^^^^^^^^^^^^            ^^^^^^^^^^^^
+;; We define a path-dependent constraint, making this functor
+;; applicative. `(SORTER (type t M/t))` is equivalent to
+;; `SORTER with t = M.t` in OCaml.
 (val Make-sorter [M]
-  (struct
-    (type t M/t)
-    (val sort #(sort-generic M/compare %))))
+  (val (struct
+         (type t M/t)
+         (val sort #(sort-generic M/compare %))) :> (SORTER (type t M/t))))
+;;        Struct to nominal coercion is explicit ^^^^^^^^^^^^^^^^^^^^^^^^
 ```
 
-This can get extremely tedious when multiple path dependent constraints must be
-defined at the same time. In such cases, we can use the path threaded mapping
-`=>`. It automatically tracks and resolves path dependent constraints, making
-annotations a lot easier to write and reason about.
+This can get extremely tedious when multiple path-dependent constraints must be
+defined at the same time. In such cases, we can use the path-threaded mapping
+`=>` and by providing the target type to coerce to in the signature itself. `=>`
+automatically tracks and resolves path-dependent constraints, making annotations
+a lot easier to write and reason about.
 
 ```clojure
-(val Make-sorter : ORD => SORTER)
+(val Make-sorter : ORD => (:> SORTER))
+;;                        ^^^^^^^^^^^ Accepts anything that is coercible to
+;;                                    `SORTER` and coerces it automatically.
 (val Make-sorter [M]
   (struct
     (type t M/t)
@@ -1312,12 +1301,12 @@ annotations a lot easier to write and reason about.
 ```
 
 Now, let's create two instances for sorting integers in ascending and descending
-order. To revise, explicit coercion is required to bind a structural record to a
-principal type.
+order.
 
 ```clojure
 (val Int-asc :> (ORD (type t int)))
-;;              ^^^^^^^^^^^^^^^^^^ Equivalent to `ORD with t = int` in OCaml.
+;;           ^^ For non-functional values, you can simply use direct explicit
+;;              coercion.
 (val Int-asc (struct
                (type t int)
                (val compare #(<= %1 %2))))
@@ -1337,20 +1326,35 @@ We can use the functor to get our sorter implementations.
 (val Int-desc-sorter (Make-sorter Int-desc))
 ```
 
-We can also build generative functors by removing the path dependent constraint.
+We can also build generative functors by removing the path-dependent constraint.
 
 ```clojure
-(val Make-sorter-gen : ORD -> SORTER)
-;;                     ^^^^^^^^^^^^^ Abstract to abstract makes use of type
-;;                                   witness, making this functor generative. 
+(val Make-sorter-gen : ORD -> (:> SORTER))
+;;                     ^^^^^^^^^^^^^^^^^^ Abstract to abstract makes use of type
+;;                                        witness, making this functor generative. 
 (val Make-sorter-gen [M]
   (struct
     (type t M/t)
     (val sort #(sort-generic M/compare %))))
 ```
 
-When we use our new functor, the type `t` is minted uniquely for each call
-making them different. These two are not compatible:
+Or, more concretely in 1ML terms, we seal the struct. Here is an inline
+annotation version of what's actually happening.
+
+```clojure
+(val Make-sorter-gen [(val M : ORD)]
+  (val (struct
+         (type t M/t)
+         (val sort #(sort-generic M/compare %))) :> SORTER))
+;;             It's an explicit coercion indeed! ^^
+```
+
+Generativity is not an inherent property of the functor's evaluation, but a
+consequence of coercion/sealing that actively severs the internal type path at
+the module boundary.
+
+Thus, the type `t` is minted uniquely for each functor call, making them
+different.
 
 ```clojure
 (val Int-asc-sorter-1 (Make-sorter-gen Int-asc))
@@ -1559,7 +1563,7 @@ Now, we define a function that performs the `some-state` effect. Miru tracks the
 set of effect types as effect rows. They are implemented using row-polymorphism.
 
 ```clojure
-(val increment-by : int -> int ! { (some-state int) .. })
+(val increment-by : int -> (some-state int) int)
 (val increment-by [amount]
   (val current (get ())) ; Effect performs look exactly like function calls.
   (set (+ current amount))
@@ -1570,7 +1574,7 @@ Now, let's write a handle for the function. It reduces the `some-state` effect
 from the row using row variables.
 
 ```clojure
-(val run-some-state : int -> (unit -> int ! { (some-state int) ..e }) -> int ! e)
+(val run-some-state : int -> (unit -> { (some-state int) ..e } int) -> e int)
 (val run-some-state [init action]
   ;; Introduce the logical region `r` required by `ref`.
   (with run-state)
@@ -1627,7 +1631,7 @@ single line.
 Now, let's write a function to create the iterator.
 
 ```clojure
-(val create-iterator : (unit -> unit ! { (yield a) ..e }) -> (iterator a) ! e)
+(val create-iterator : (unit -> { (yield a) ..e } unit) -> e (iterator a))
 (val create-iterator [action]
   (with (handle
     (return _) Done
@@ -1643,7 +1647,7 @@ Now, let's write a function to create the iterator.
 And a function to drive the iterators.
 
 ```clojure
-(val run-iterator : (iterator int) ! e -> unit ! e)
+(val run-iterator : e (iterator int) -> e unit)
 (val run-iterator [iter]
   (match iter
     (Done) ()
@@ -1684,9 +1688,9 @@ Now, let's implement a `choices` function that chooses values depending on
 `flip`'s value.
 
 ```clojure
-(val choices : int -> int ! flip)
-;;                          ^^^^ Since this function produces only one effect,
-;;                              we don't need to wrap it in an effect row.
+(val choices : int -> flip int)
+;;                    ^^^^ Since this function produces only one effect,
+;;                        we don't need to wrap it in an effect row.
 (val choices [x]
   (if (flip ())
 ;;    ^^^^^^^^^ `flip` is only performed once.
@@ -1697,7 +1701,7 @@ Now, let's implement a `choices` function that chooses values depending on
 And write a handle function for the `flip` effect.
 
 ```clojure
-(val handle-flip : (unit -> a ! { flip ..e }) -> (list a) ! e)
+(val handle-flip : (unit -> { flip ..e } a) -> e (list a))
 (val handle-flip [action]
   (with (handle
     (return v) '(v)
@@ -1741,7 +1745,7 @@ short-circuiting searches. Let's model them.
 Let's write a simple function to validate age brackets.
 
 ```clojure
-(val parse-age : int -> int ! { (exn string) })
+(val parse-age : int -> (exn string) int)
 (val parse-age [age]
   (if (< age 0)
     (throw "Age can't be negative")
@@ -1751,7 +1755,7 @@ Let's write a simple function to validate age brackets.
 And a handle function to encode the effect into a `maybe` monad.
 
 ```clojure
-(val handle-exn : (unit -> a ! { (exn string) ..e }) -> (maybe a) ! e)
+(val handle-exn : (unit -> { (exn string) ..e } a) -> e (maybe a))
 (val handle-exn [action]
   ; If we want to handle just one operation, we don't need to use
   ; the handle form. This is a neat shortcut.
@@ -1785,7 +1789,7 @@ but this time with a `raw` yield. We're going to reuse the `iterator` data type.
 And the `create-iterator` function.
 
 ```clojure
-(val create-iterator : (unit -> unit ! { (yield a) ..e }) -> (iterator a) ! e)
+(val create-iterator : (unit -> { (yield a) ..e } unit) -> e (iterator a))
 (val create-iterator [action]
   (with (handle
     (return _) Done
@@ -1829,7 +1833,7 @@ re-writer.
   !s)
 ```
 
-`with`-form also defines special interactions with `handle`s and `provide`s,
+`with`-form also defines special interactions with `handle`s and `given`s,
 making them really nice to work with.
 
 ```clojure
@@ -1883,39 +1887,29 @@ very good reasons. Let's start by implementing a `SHOW` signature.
     (val show : t -> string)))
 ```
 
-Miru tacks contexts using `? { ... }` row. Just like effects, contexts support
-row-polymorphism. We can also define a local alias for a context using the
-rebind operator `<~`.
+Miru tacks contexts using the context row `-{ ... }->`. Just like effects,
+contexts make use of row-polymorphism, but do not expose a row operator `..`.
+This is because, the type handles it behind the scenes implicitly. To add, we
+can define a local alias for a context using rebinds `=`.
 
 ```clojure
-(val print-show : a ? { S <~ (SHOW (type t a)) .. } -> unit)
+(val print-show : a -{ (SHOW (type t a)) = S }-> unit)
+;;                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+;; This reads as: "To produce unit from a, this context must be fulfilled."
 (val print-show [x]
   (println (f"Printing {}!" (?S/show x))))
 ;;                           ^^ `?<id>` is how we read from the context row.
 ```
 
-Let's dissect the signature. We define an abstract type `a` and take an argument
-of type `a` that demands an instance in it's environment that implements the
-`SHOW` signature with its abstract type `t` equating to `a`. Just like `sig` and
-`struct`-forms, Miru provides a `row`-form to neatly type polymorphic rows when
-making heavy use of rebinds. Thus, the signature could also be written as:
-
-```clojure
-(val print-show : a ? (row (val S (SHOW (type t a)))) -> unit)
-```
-
-It functionally replaces `{ ... }` with `(row ...)` and the rebind operator `<~`
-with the well-defined `val`-form.
-
 Let's implement the `SHOW` signature for integers and lists.
 
 ```clojure
-(val Show-int :> SHOW)
+(val Show-int :> (SHOW (type t int)))
 (val Show-int (struct
                 (type t int)
                 (val show #(Int/into-string %))))
 
-(val Show-list : SHOW => SHOW)
+(val Show-list : SHOW => (:> SHOW))
 (val Show-list [S]
   (struct
     (type t (list S/t))
@@ -1925,13 +1919,13 @@ Let's implement the `SHOW` signature for integers and lists.
 
 We can't pass the modules or functors directly to the `print-show` function; it
 expects them to ambiently available in the environment. This is where we use the
-`provide`-form.
+`given`-form.
 
 ```clojure
-(with (provide { Show-int, .. }))
+(with (given Show-int))
 (print-show 4) ; Printing 4!
 
-(with (provide { (Show-list Show-int), .. }))
+(with (given (Show-list Show-int)))
 (print-show '(1 2 3)) ; Printing list(1 2 3)!
 ```
 
@@ -1941,7 +1935,7 @@ needing a `SHOW` instance for its element type), the compiler performs backward
 chaining to logically derive the demand for the unspecified instance.
 
 ```clojure
-(with (provide { Show-int, Show-list, .. }))
+(with (given Show-int Show-list))
 (print-show '(1 2 3)) ; Printing list(1 2 3)!
 ```
 
@@ -1974,11 +1968,10 @@ Modes can be introduced using various ways. The easiest way is to use the
 (val x "Hello")
 ```
 
-Or, inlining them to the binding name is always a possibility.
+Or, inlining them is always a possibility.
 
 ```clojure
-;; Just specify the mode and let the compiler do the rest of the inference.
-(val (x @ once) "Hello")
+(val x (val "Hello" @ once))
 ```
 
 This example implements a one-time cryptographic handshake token. Once the token
