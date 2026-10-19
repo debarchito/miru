@@ -1942,18 +1942,50 @@ chaining to logically derive the demand for the unspecified instance.
 ### 12. Modalities
 
 Modalities or modes define the structural constraints carried by a particular
-value. This includes properties like linearity (if a value can be used multiple
-times), uniqueness (if a value can be held uniquely), locality (if a value is
-local to a scope), among others. Each of these properties are their own temporal
+value. This includes properties like locality (if a value is local to a scope),
+linearity (if a value can be used multiple times), uniqueness (if a value can be
+held uniquely), among others. Each of these properties are their own temporal
 axes: they either define what already happened in the past, or what can happen
 in the future. Unlike effects and contexts, modalities do not use
 row-polymorphism, but use graded modal calculus using an ordered semiring.
-Miru's modalities take heavy inspiration from Jane Street's work on OxCaml.
+Miru's modalities take heavy inspiration from Jane Street's work on OxCaml. Much
+like OxCaml, modalities exist independently of standard types; they are
+orthogonal.
 
-#### 12.1. Linearity
+#### 12.1. Locality
 
-Values can either be linearly `once` or `many`. A `once` value, can't be copied,
-cloned or borrowed. Their ownership can only be moved or consumed.
+Locality controls where a value can live and flow. Values are categorized by
+locality as either `local` or `global` with the latter being the default.
+
+A `local` value is restricted to its enclosing region, forbidding it from
+escaping into a return value, being captured by a escaping closure, or being
+stored in long-lived data structures. Conversely, `global` values have no such
+restriction and can be safely shared or returned.
+
+```clojure
+;; Function that processes local data within its stack frame.
+(val sum-pairs : (list int) @ local -> int)
+(val sum-pairs [pairs]
+  (List/reduce + 0 pairs)) ; Works fine; `pairs` never leaves this scope.
+```
+
+If a `local` value attempts to cross its boundary, the compiler triggers a
+static error.
+
+```clojure
+(val leak-array : (array int) @ local -> (array int)) 
+(val leak-array [arr]
+   arr) 
+;; ^^^ ERROR: arr is `local` and can't escape its region.
+```
+
+> [!TODO] Document exclaves.
+
+#### 12.2. Linearity
+
+Linearity governs how many times a value can be used: `many` values can be
+freely reused, whereas `once` values are affine. `once` values cannot be copied,
+cloned, or borrowed; they can only be moved or consumed.
 
 ```clojure
 (val x "Hello") ; Values by default are always `many`.
@@ -1963,8 +1995,8 @@ Modes can be introduced using various ways. The easiest way is to use the
 `val`-annotation form and the `@ [ ... ]` mode tuple.
 
 ```clojure
-(val x : string @ once)
-;;                ^^^^ When using only one mode, `[ ... ]` isn't required.
+(val x @ once)
+;;       ^^^^ When using only one mode, the tuple `[ ... ]` isn't required.
 (val x "Hello")
 ```
 
@@ -1979,83 +2011,104 @@ is used to authenticate, it must be consumed so it can never be reused or
 leaked.
 
 ```clojure
+;; Function that takes an unrestricted value.
+(val log-attempt : string -> unit)
+(val log-attempt [msg]
+  (println (f"Auth attempted with message: {}" msg)))
+
 ;; Function that consumes a linear token.
 (val auth : token @ once -> string)
 (val auth [t]
   (Crypto/verify-and-burn t))
 ;; ^^^^^^^^^^^^^^^^^^^^^^ This is some random function that consumes `t`.
-
-;; Function that takes an unrestricted value.
-(val log-attempt : string -> unit)
-(val log-attempt [msg]
-  (println (f"Auth attempted with message: {}" msg)))
 ```
 
-Let's define a message and try calling the second function multiple times.
+Let's try calling the first function multiple times with some value `msg`.
 
 ```clojure
 (val msg "Initiating Handshake")
-(log-token-attempt msg) ; Works fine
-(log-token-attempt msg) ; Still fine because `msg` is `many` by default.
+
+(log-attempt msg) ; This is fine.
+(log-attempt msg) ; It's still fine because `msg` is `many`.
 ```
 
-Let's try the same but for the linear function.
+Now, let's try something similar, but for the latter function.
 
 ```clojure
 ;; Let's mint some token.
-(val (token @ once) (Crypto/generate-token ()))
-(val auth-status-1 (authenticate token)) ; Works
-(val auth-status-2 (authenticate token))
-;;                               ^^^^^ ERROR: `token` is defined as `once`
-;;                                     and it was already consumed.
+(val token @ once)
+(val token (Crypto/generate-token ()))
+
+;; And, authenticate using it.
+(val auth-status-1 (auth token)) ; This is fine.
+(val auth-status-2 (auth token))
+;;                       ^^^^^ ERROR: `token` is `once`, and it was
+;;                             already consumed.
 ```
+
+#### 12.3. Uniqueness and Function-but-in-place (FBIP)
+
+Values can either be `unique`ly owned or `aliased`. A `unique` value guarantees
+that there are no other active aliases or references pointing to the same memory
+at the point of access.
+
+```clojure
+(let msg @ unique)
+(let msg "hello")
+
+(aliased-use msg) ; `msg` used as aliased i.e. its uniqueness is lost.
+(unique-use msg))
+;;          ^^^ ERROR: Expected `msg` to be `unique` but it is `aliased`.
+```
+
+To solve this, we introduce borrowing `&<id>`.
+
+```clojure
+(let msg @ unique)
+(let msg "hello")
+
+(aliased-use &msg) ; Temporarily aliases `msg` for its scope.
+(unique-use msg)) ; `msg` is uniquely owned, so it compiles.
+```
+
+The signature of the `aliased-use` is as follows:
+
+```clojure
+(val aliased-use : string @ [local aliased] -> unit)
+;;                          ^^^^^^^^^^^^^^^ This makes it an immutable
+;;                                          borrow.
+(val aliased-use [msg]
+  ...) ; `msg` can't escape this function i.e. you can't return it to
+       ; the outside world.
+```
+
+A borrowed value is `aliased` so it can't be passed where a `unique` value is
+expected. It is also `local`, because it can't escape its borrow region.
+
+Uniqueness guarantees exclusive access, enabling functions to perform in-place
+mutation without breaking referential transparency. This pattern is termed
+**Functional-but-in-place (FBIP)**. If a parameter is typed as `unique`, the
+compiler ensures that the caller passes an exclusive reference. The function can
+then destructively update or reuse the underlying memory buffer, even if the
+underlying data is inherently immutable.
+
+```clojure
+(val reverse-acc : (list a) @ unique -> (list a) -> (list a) @ unique)
+(val reverse-acc [xs acc]
+  (match xs
+;;       ^^ Since it's uniquely owned, it's consumed destructively i.e.
+;;          the memory is physically reused for the new `Cons` nodes
+;;          being built for the accumulator.
+    Nil acc)
+    (Cons y ys) (reverse-acc ys (Cons y acc)))
+```
+
+> [!TODO] Document the remaining modalities.
 
 > [!NOTE]
 > The section below is yet to be serialized properly.
 
 ```clojure
-;; The uniqueness axis: a value is either @unique (exactly one live
-;; reference) or the default, shared.
-(begin
-  (let (x @ { unique }) "hello")
-  (global-aliased-use x) ; x used as aliased i.e. uniqueness is lost.
-  (unique-use x)) ; ERROR: x has already been aliased.
-
-;; To solve this, we introduce borrowing: &<id>
-(begin
-  (let (x @ { unique }) "hello")
-  (global-aliased-use &x) ; Temporarily alias x.
-  (unique-use x)) ; x is still uniquely owned.
-
-;; A borrowed value is aliased so it can't be passed where a unqiue value
-;; is expected. It is also local, because it can't escape the current
-;; borrow region.
-
-;; The original value is inferred as many for borrow to work i.e.
-(let (x @ { once }) "hello")
-(global-aliased-use &x) ; ERROR: x is once, must be many.
-
-;; The locality axis: @local restricts a value to its enclosing scope,
-;; forbidding it from escaping into a return value, a closure, or a heap
-;; structure.
-(val sum-pairs : (array int) @ { local } -> int)
-(let sum-pairs [pairs]
-  (reduce + 0 pairs)) ; fine: pairs never leaves this scope.
-
-(val leak-pairs : (array int) @ { local } -> (array int)) 
-(let leak-pairs [pairs]
-  pairs) ; ERROR: @local value would escape via the return type.
-
-;; We can always compose the modes e.g. value @ { local unique } and it
-;; implements sub-moding.
-
-;; Moding also has an keyword alias.
-(val leak-pairs : (array int) is { local } -> (array int)) 
-
-;; To avoid the confusion of what "coeffects" mean, flat coeffects (?) are commonly
-;; refered to as ambient contexts or just contexts while structural coeffects (@) are
-;; effectively called modes in Miru.
-
 ;; Miru's procedural macros provide the same expression power as OCaml PPX
 ;; rewriters. Hence, they come with their own set of downsides: fragility,
 ;; hygiene and most importantly they are untyped. While they are very powerful
