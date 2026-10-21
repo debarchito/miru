@@ -1,10 +1,9 @@
-> [!NOTE]
-> This document outlines the language's design, feature sets, trade offs,
-> soundness and related aspects. It aims to provide a detailed and unambiguous
-> informal specification, serving as a reliable reference. It is an ongoing
-> process, and nothing is finalized.
+> [!NOTE] This document outlines the language's design, feature sets, trade
+> offs, soundness and related aspects. It aims to provide a detailed and
+> unambiguous informal specification, serving as a reliable reference. It is an
+> ongoing process, and nothing is finalized.
 
----
+______________________________________________________________________
 
 Miru is a strictly evaluated functional language designed to be a Lisp-like with
 ML semantics. It aims to compose algebraic effects, co-effects, and liquid
@@ -145,36 +144,36 @@ tail-recursive implementation of factorial. Miru will automatically perform
 tail-call elimination for all tail-recursive functions.
 
 ```clojure
-(val (rec factorial) [n (val acc 1)] ; You can inline `val`-forms to set
-                                     ; default values of arguments.
+(val (rec factorial) [n (val %acc 1)] ; You can inline `val`-forms to set
+                                      ; default values for `%<named>` arguments.
   (if (<= n 1)
     acc
     (factorial (- n 1) (* n acc))))
+;;                          ^^^ Once bound, you can refer them without `%`.
 
 ;; Now, let's call it.
 (factorial 6) ; 720
 
 ;; Or, get a tad bit explicit.
-(factorial (val acc 1) (val n 6)) ; Order doesn't matter with named arguments.
+(factorial (val %acc 1) (val %n 6)) ; The order doesn't matter.
 ```
 
 If we try to do the same but without the `rec` specifier, we are greeted with an
 error.
 
 ```clojure
-(val factorial [n (val acc 1)]
+(val factorial [n (val %acc 1)]
   (if (<= n 1)
     acc
     (factorial (- n 1) (* n acc))))
 ;;  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ERROR: Unbound binding `factorial`. Did you
-;;                                 forget to mark `factorial` as recursive?
+;;                                 forget to specify `factorial` as recursive?
 ```
 
 We can extend this naturally to mutually recursive functions.
 
 ```clojure
-(val (rec is-even?) [n] ; Ending names in `?` is a convention for boolean
-                        ; functions.
+(val (rec is-even?) [n] ; Boolean functions end in `?` as convention.
   (match n
     0 true
     n (is-odd? (- n 1))))
@@ -197,12 +196,23 @@ style, the `fn`-form, and the `#(...)` reader macro for `fn`-forms.
 
 ```clojure
 (val factorial
-  (Function/fix #(fn [n (val acc 1)]
+  (Function/fix #(fn [n (val %acc 1)]
     (if (<= n 1)
       acc
       (% (- n 1) (* n acc))))))
-;;     ^ is the placeholder for the first argument. Positional placeholders are
-;;       also allowed: %1 for first, %2 for second, and %n for nth position.
+;;     ^ is the first argument. Positional placeholders are also allowed:
+;;       %1 for first, %2 for second, and %n for nth position.
+```
+
+This can also be written without `#(...)`.
+
+```clojure
+(val factorial
+  (Function/fix (fn [self]
+    (fn [n (val %acc 1)]
+      (if (<= n 1)
+        acc
+        (self (- n 1) (* n acc)))))))
 
 (factorial 6) ; 720
 ```
@@ -299,11 +309,10 @@ This is semantically the same as:
   (* a b))
 ```
 
-> [!NOTE]
-> While inline expressions offer a flexible, quick way to guide the compiler
-> locally, they should be used sparingly. Whenever a function signature becomes
-> complex, involving dense modal logic, effects, or refinements, the top-level
-> `val`-annotation form is preferred to keep things readable.
+> [!NOTE] While inline expressions offer a flexible, quick way to guide the
+> compiler locally, they should be used sparingly. Whenever a function signature
+> becomes complex, involving dense modal logic, effects, or refinements, the
+> top-level `val`-annotation form is preferred to keep things readable.
 
 #### 2.6. Calling a function just for its side-effects
 
@@ -630,8 +639,8 @@ subsections. Let's explore the three view types Miru provides: `string-view`,
 intertwined with modalities (an implementation of structural co-effects) and
 borrowing, which we will explore in further detail later.
 
-> [!NOTE]
-> This section requires ironing out modalities and cross-mode interaction.
+> [!NOTE] This section requires ironing out modalities and cross-mode
+> interaction.
 
 #### 4.6. Sets
 
@@ -883,10 +892,10 @@ field binding operator `~`.
 (val record { ~id, .. }) ; Identical to { id id, .. } i.e. { id "value", .. }.
 ```
 
-When matching against a record, we can use the rebind field names using `=`.
+When matching against a record, we can rebind field names using the `val`-form.
 
 ```clojure
-(val { id = field, .._ } record) ; This is a form of pattern matching.
+(val { (val field id), .._ } record) ; This is a form of pattern matching.
 (println f"{field}") ; value
 ```
 
@@ -937,6 +946,8 @@ valid:
 ;;                     precede field updates.
 ```
 
+#### 6.6. Polarity constraints
+
 Because structural records allow open-world rows, splatting one structural
 record into another introduces the risk of silent field masking. If a source
 record carries an unexpected field within its row variable `..`, explicitly
@@ -969,7 +980,7 @@ fields `a`, `b` and `c`.
 `transform` safely adds the fields `a`, `b` and `c` to the open-ended record
 while preventing silent overrides.
 
-#### 6.6. Mutable fields
+#### 6.7. Mutable fields
 
 Records can have mutable fields using the `mut` specifier. Mutability must be
 bound to a logical region, which is `r` in this example. We'll look more into
@@ -1001,7 +1012,7 @@ their explicit type signatures, it can be used for them as well.
 (println (f"{}" p2/age)) ; 32
 ```
 
-#### 6.7. Reference cells and regions
+#### 6.8. Reference cells and regions
 
 We can use this property to build a reference cell around records to emulate
 mutable names.
@@ -1032,7 +1043,7 @@ Multiple distinct data structures within the same scope can share a single
 logical region `r` regardless of being allocated on the stack or the heap. This
 allows the compiler to cleanly group and track their associated state effects.
 
-#### 6.8. `var`-form and the `run-state` function
+#### 6.9. `var`-form and the `run-state` function
 
 Reading and writing to mutable values within a bounded scope is referentially
 transparent, provided the mutation is strictly encapsulated and cannot be
@@ -1121,7 +1132,7 @@ from `var`-forms. This example is equivalent to the original `var`-form example.
   !x) ; 3
 ```
 
-#### 6.9. Record signatures and structures
+#### 6.10. Record signatures and structures
 
 Structural records in particular have access to special `sig` and `struct`-forms
 that make them cleaner to write. Nominal records can't be represented using
@@ -1135,8 +1146,8 @@ rewrite the `session` type structurally:
     (val name : string)))
 
 ;; Structural records do not unify with principal types automatically,
-;; preserving decidable unification.
-(val first : session)
+;; preserving decidable unification. They must be explicitly coerced.
+(val first :> session)
 (val first
   (struct
     (val id "Miru")
@@ -1146,11 +1157,11 @@ rewrite the `session` type structurally:
 (type session
   { id : string, name : string, .. })
 
-(val first : session)
+(val first :> session)
 (val first { id "Miru", name "The first session", .. })
 ```
 
-#### 6.10. Abstract types in records
+#### 6.11. Abstract types in records
 
 Records can also hold arbitrary abstract types. The visibility and resolution of
 these abstract types depend on the life-cycle of the containing record:
@@ -1178,7 +1189,7 @@ generative functors.
     (val compare : t -> t -> int)))
 ```
 
-#### 6.11. Modular encapsulation
+#### 6.12. Modular encapsulation
 
 Fields are public by default, but we can take advantage of the row operator `..`
 consuming unspecified fields to control visibility.
@@ -1188,7 +1199,7 @@ consuming unspecified fields to control visibility.
   (sig
     (val greet : unit -> string)))
 
-(val second : session)
+(val second :> session)
 (val second
   (struct
     ;; The `id` field is not accessible outside because the `session` type
@@ -1213,7 +1224,7 @@ but inside-out. This can only be used inside `sig` and `struct`-forms.
     (val id : string)
     (val greet : unit -> string)))
 
-(val second : session)
+(val second :> session)
 (val second
   (struct
     ;; The `id` field is still not accessible outside.
@@ -1236,7 +1247,7 @@ intentional because it reflects how modules are implemented in Miru; at their
 core, they are just structural records coupled with fancier syntax and an
 additional ability to control encapsulation inside-out.
 
-#### 6.12. Applicative and generative functors
+#### 6.13. Applicative and generative functors
 
 Let's start by revisiting the `ORD` example, and implementing an additional
 `SORTER` interface.
@@ -1889,16 +1900,18 @@ very good reasons. Let's start by implementing a `SHOW` signature.
 
 Miru tacks contexts using the context row `-{ ... }->`. Just like effects,
 contexts make use of row-polymorphism, but do not expose a row operator `..`.
-This is because, the type handles it behind the scenes implicitly. To add, we
-can define a local alias for a context using rebinds `=`.
+This is because, the type handles it behind the scenes implicitly. Additionally,
+we can define a local alias for a context using the `val`-form.
 
 ```clojure
-(val print-show : a -{ (SHOW (type t a)) = S }-> unit)
-;;                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-;; This reads as: "To produce unit from a, this context must be fulfilled."
+(val print-show : a -{ (val S (SHOW (type t a))) }-> unit)
+;;                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+;; This reads as, "To produce `unit` from `a`, `S` must be provided ambiently."
 (val print-show [x]
   (println (f"Printing {}!" (?S/show x))))
-;;                           ^^ `?<id>` is how we read from the context row.
+;;                           ^^ `?<id>` is how we extract a context from the
+;;                              context row. They are like `%<named>` arguments
+;;                              but ambient.
 ```
 
 Let's implement the `SHOW` signature for integers and lists.
@@ -2105,8 +2118,7 @@ underlying data is inherently immutable.
 
 > [!TODO] Document the remaining modalities.
 
-> [!NOTE]
-> The section below is yet to be serialized properly.
+> [!NOTE] The section below is yet to be serialized properly.
 
 ```clojure
 ;; Miru's procedural macros provide the same expression power as OCaml PPX
