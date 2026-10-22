@@ -1899,12 +1899,11 @@ very good reasons. Let's start by implementing a `SHOW` signature.
 ```
 
 Miru tacks contexts using the context row `-{ ... }->`. Just like effects,
-contexts make use of row-polymorphism, but do not expose a row operator `..`.
-This is because, the type handles it behind the scenes implicitly. Additionally,
-we can define a local alias for a context using the `val`-form.
+contexts make use of row-polymorphism. Additionally, we can define a local alias
+for a context using the `val`-form.
 
 ```clojure
-(val print-show : a -{ (val S (SHOW (type t a))) }-> unit)
+(val print-show : a -{ (val S (SHOW (type t a))) .. }-> unit)
 ;;                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ;; This reads as, "To produce `unit` from `a`, `S` must be provided ambiently."
 (val print-show [x]
@@ -2118,71 +2117,125 @@ underlying data is inherently immutable.
 
 > [!TODO] Document the remaining modalities.
 
+### 13. Multi-stage programming
+
+#### 13.1 Quoting and splicing
+
+Miru replaces traditional, unhygienic macros with **Multi-Stage Programming
+(MSP)** to safely generate and optimize code. Instead of manipulating raw source
+text, Miru uses two type-safe operations to control how expressions are built
+and composed:
+
+- **Quoting `` `(...) ``:** Defers the execution of a valid expression,
+  packaging it into an unevaluated, strongly typed `expr` structure while
+  preserving its original semantics.
+- **Splicing `$(...)`:** Acts as a structural composition operator. It leaves a
+  "hole" inside a quotation where another `expr` can be cleanly embedded without
+  running it immediately.
+
+#### 13.2. The `expr` data structure
+
+Quoting an expression produces an opaque `(expr [L C E])` type. This type is
+completely inert, meaning it can be stored, passed around, and manipulated like
+any normal data value. Its 3-tuple signature tracks strict semantic contracts:
+
+- **`L` (Type and modalities):** The value type the expression will eventually
+  produce, preserving the mode constraints.
+- **`C` (Context):** The encoded ambient dependencies the expression needs to
+  compute.
+- **`E` (Effects):** The encoded effects that can be performed when the
+  expression is executed.
+
+When we splice expressions together, their context demands (`C`) and effects
+(`E`) immediately bubble up into the outer quotation's type signature. This
+ensures that contexts and effects are completely accounted for before any
+execution happens.
+
+#### 13.3. Evaluation drivers
+
+Because splicing only structures code rather than running it, evaluation must be
+triggered by an explicit driver. Miru provides two distinct drivers over the
+same `expr` type:
+
+- **`realize` (Compile-Time or Comptime):** Evaluates the expression on the
+  build machine during compilation, baking constants or code directly into the
+  final binary.
+- **`lower` (Runtime):** Evaluates the expression on the target's machine during
+  program execution, dynamically JIT-compiling and running it on the fly.
+
+Let's look at a simple unrolling `multiply` function:
+
+```clojure
+(val multiply : int -> (expr [int _ _]) -> (expr [int _ _]))
+;;                                ^ ^                 ^ ^
+;; Let the compiler infer the encoded effects and contexts for us, which in this
+;; case are gonna be empty.
+(val (rec multiply) [n x] 
+  (match n
+    0 `1
+    1 x
+    _ `(* $x $(multiply (- n 1) x)))) ; Splice composition.
+```
+
+Now, we can drive the evaluation:
+
+```clojure
+(val res1 (realize #(multiply 2 `3))) ; Compiled as `(val res1 (* 3 3))`.
+(val res2 (lower #(multiply 2 `3))) ; Just-in-compiled at runtime and executed
+                                    ; right after.
+```
+
+#### 13.4. In-phase evaluation invariants
+
+In both cases, the compiler spins up the `miru-machine` (the Miru VM) to drive
+the evaluation: `realize` spins it up during extended compilation, while `lower`
+spins it up on-demand at runtime. Every `$(...)` behaves as a `realize` or
+`lower` operation depending on the active driver. This yields native
+`realize`-in-`realize` and `lower`-in-`lower` meta staging, where both
+operations occur _in-phase_ (within the exact same evaluation stage).
+
+However, mixing phases via cross-stage nesting introduces invariants that the
+type and driver systems must strictly enforce:
+
+- **`lower`-in-`realize` is illegal:** Compilation occurs on the build machine;
+  attempting to dynamically evaluate code intended for a foreign target machine
+  lacks the necessary runtime context, state, and target-specific capabilities.
+- **`realize`-in-`lower` is safe but redundant:** Because the program is already
+  running on the target machine at runtime, compile-time evaluation collapses
+  into immediate execution, making it semantically indistinguishable from a
+  standard nested `lower`-in-`lower` operation.
+
+#### 13.5. Enforcing invariants through capabilities
+
+To enforce these invariants, Miru uses contexts and polarity constraints to
+model capabilities. `realize` requires the `Comptime` and `-Runtime`
+capabilities, while `lower` requires the `Runtime` and `-Comptime` capabilities.
+To revise, polarity constraints are inert, and they unify monotonically.
+
+```clojure
+(realize
+  #((val a 32)
+    (val a' (lift a)) ; (expr [int Context/empty Effect/empty])
+;;          ^^^^^^^^ Lifts are explicit!
+    (val b (lower #(`(+ $a' 40)))))
+;;         ^^^^^^^^^^^^^^^^^^^^^^ ERROR: `lower` requires the context `Runtime`
+;;                                       which collides with the defined polarity
+;;                                       `-Runtime`.
+    `b)
+
+(lower
+  #((val a 32)
+    (val a' (lift a))
+    (val b (realize #(`(+ $a' 40)))))
+;;         ^^^^^^^^^^^^^^^^^^^^^^^^ ERROR: `realize` requires the context `Comptime`
+;;                                         which collides with the defined polarity
+;;                                         `-Comptime`.
+    `b)
+```
+
 > [!NOTE] The section below is yet to be serialized properly.
 
 ```clojure
-;; Miru's procedural macros provide the same expression power as OCaml PPX
-;; rewriters. Hence, they come with their own set of downsides: fragility,
-;; hygiene and most importantly they are untyped. While they are very powerful
-;; compiler extensions, a typed subset makes day-to-day utilities feel less like
-;; a chore. Miru takes a lot of inspiration from MetaOCaml, Scala, Nim, MacoCaml
-;; to implement expression values, and the two basic constructs to build them:
-;; quoting and splicing.
-
-;; These are just normal Miru functions that modify (expr a) just like any
-;; other data structure.
-(val unroll : int -> (expr int) -> (expr int))
-(let (rec unroll) [n x] 
-  (match n
-    0 `1 ; This is quoting.
-    1 x
-    _ `(* $x $(unroll (- n 1) x)))) ; Both $(<token>) and $<token> are splices.
-
-;; Miru implements multi-stage programming (MSP) such that quotes increment the stage while
-;; splices decrement the stage; `(...) and $(...) are syntactic and are intertwined
-;; with each other. There are two phasing bridges: (lift <x>) turns a stage-x value
-;; into a stage-(x + 1) value i.e. a -> (expr a) while (lower <x>) evalues a stage-(x + 1)
-;; value to produce a stage-x value i.e. (expr a) -> a.
-
-;; `unroll` returns a value of type (expr int) thus, making it stage-1.
-(let value (lower (unroll 4 `3))) ; `lower` drops it to stage-0 by evaluating it.
-
-;; Rule of thumb: stage = count of `expr`.
-;; e.g. (expr (expr (expr int))) is stage-3.
-
-;; MSP is phase-agnostic i.e. we could expand the expressions either at compile-time or
-;; at runtime. So, how do we drive the context? We divide it. `lower` lowers the expression
-;; at runtime, while `realize` realizes the expression at compile-time. Both are a form of
-;; "lowering" values.
-
-(let value (realize (unroll 4 `3))) ; It will be realized at compile-time unlike `lower`.
-
-;; This allows us to mix and match code that evalues at compile-time with code that should evaluate
-;; at runtime. That said, there is a specific rule that must be followed: we can lower an expression
-;; that realizes but not realize an expression that lowers at the same stage. The idea is rather simple:
-;; `lower` waits till runtime to compile an expression while `realize` expects the expression to
-;; evaluate entirely at compile-time.
-
-;; Let's take this function for e.g.
-(let illegal [quote]
-  (let x (lower quote)) ; ERROR! Trying to lower and realize at the same stage is a violation!
-  `x) ; This is the lift!
-
-(realize (illegal `(+ 1 2)))
-
-;; This on the other hand is fine!
-(let legal [quote]
-  `(lower $quote)) ; `lower` is at stage-(realize + 1), so it's allowed.
-
-(realize (legal `(+ 1 2)))
-
-;; This rule exists to preserve compile-time determinism while allowing users
-;; to do so at runtime. To track this in the type-system Miru models capabilities
-;; using it's powerful coeffect system. Additionally, realization is such a common
-;; operation that Miru has a simple top-level reader for it which mirrors splicing:
-
-$(legal `(+ 1 2))
-
 ;; Miru integrates SMT solvers to provide native support for Liquid Refinement
 ;; types! A rather common runtime check is array bounds but with liquid types,
 ;; we can prove that an index never leaves the array's bounds at compile-time!
