@@ -955,19 +955,20 @@ adding a field with the same name after the splat will shadow the hidden value.
 This can cause down-stream semantic bugs if subsequent consumers expect the
 hidden value's original configuration.
 
-To prevent this, Miru introduces polarity constraints (or polarities) using row
-variables refinements `..<id> | {<field> ...}`. Elements by default always carry
-the _presence_ polarity while the _absence_ polarity can be introduced using
-`-<field>`. Polarities are inert and do not require a special solver; they unify
-like normal elements and only cause a unification error when trying to unify
-with their opposite polarity.
+To prevent this, Miru introduces polarity constraints (or polarities) using
+lacks `..<id> \ {<field> ...}`. Elements by default always carry the _presence_
+polarity while lacks introduces _absence_ polarities.
+
+Polarities are inert and do not require a special solver; they unify like normal
+elements and only cause a unification error when trying to unify with their
+opposite polarities (_presence_ can be duplicated).
 
 In this example, the row variable `p` is mathematically guaranteed to lack the
 fields `a`, `b` and `c`.
 
 ```clojure
-(val transform : { ..p | {-a -b -c} } -> { a int, b string, c boolean, ..p })
-;;               ^^^^^^^^^^^^^^^^^^^^ The constraint is on the input.
+(val transform : { ..p \ {a b c} } -> { a int, b string, c boolean, ..p })
+;;               ^^^^^^^^^^^^^^^^^ The constraint is on the input.
 (val transform [input]
   { a 10, b "meta", c true, input.. })
 ;;                          ^^^^^^^ Splating is safe because `input` is an
@@ -1556,63 +1557,7 @@ surrounding environment, leaving an enclosing handle to decide how that request
 is fulfilled. Miru's effect system is modeled after the Koka programming
 language and the similarities are canonical.
 
-#### 8.1. Direct operations
-
-Direct operations are used to perform an operation and return a value directly
-to the perform site while having tail-resumption as a guarantee. They can resume
-exactly once and have no access to a continuation because they do not allocate
-one. They are typed and executed exactly like normal functions.
-
-```clojure
-(effect (some-state a)
-  (val get : unit -> a)
-  (val set : a -> unit)) ; They are defined using the `val`-form, just like
-                         ; functions.
-```
-
-Now, we define a function that performs the `some-state` effect. Miru tracks the
-set of effect types as effect rows. They are implemented using row-polymorphism.
-
-```clojure
-(val increment-by : int -> (some-state int) int)
-(val increment-by [amount]
-  (val current (get ())) ; Effect performs look exactly like function calls.
-  (set (+ current amount))
-  (get ()))
-```
-
-Now, let's write a handle for the function. It reduces the `some-state` effect
-from the row using row variables.
-
-```clojure
-(val run-some-state : int -> (unit -> { (some-state int) ..e } int) -> e int)
-(val run-some-state [init action]
-  ;; Introduce the logical region `r` required by `ref`.
-  (with run-state)
-  (var internal-state init)
-
-  ;; The `with`-form installs the effect handle, mapping operations to 
-  ;; the variable `internal-state`.
-  (with (handle
-    (get _) internal-state
-    (set x) (:= x internal-state)))
-;;          ^^^^^^^^^^^^^^^^^^^^^ Both of these operations are tail-resumptive.
-
-  ;; Execute the action safely within the handle and region scope.
-  (action ()))
-```
-
-Now, let's call our function.
-
-```clojure
-(val res (run-some-state 10 #(increment-by 5)))
-(println f"{res}") ; 15
-```
-
-In this example, we effectively modeled our own state transformer by composing
-the language primitives.
-
-#### 8.2. Control operations
+#### 8.1. Control operations
 
 Control operations are the most general for of operations that capture the
 delimited continuation at the perform site. The continuation can either be
@@ -1736,7 +1681,7 @@ All of these examples made use of a deep handle. It automatically re-installs
 itself around its continuation whenever an operation is intercepted. We'll look
 into shallow handles in future chapters.
 
-#### 8.3. Final operations
+#### 8.2. Final operations
 
 Final operations are explicitly non-resumptive operations i.e. they capture a
 continuation just to discard it completely. They compile down to efficient
@@ -1784,7 +1729,7 @@ And an example to go with it.
 (println f"{res}") ; Nothing
 ```
 
-#### 8.4. Raw operations
+#### 8.3. Raw operations
 
 Raw operations are unmanaged escape-hatches that provide direct access to raw
 continuation fibers without automatic handle re-installation (often called a
@@ -1904,7 +1849,7 @@ for a context using the `val`-form.
 
 ```clojure
 (val print-show : a -{ (val S (SHOW (type t a))) .. }-> unit)
-;;                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+;;                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ;; This reads as, "To produce `unit` from `a`, `S` must be provided ambiently."
 (val print-show [x]
   (println (f"Printing {}!" (?S/show x))))
