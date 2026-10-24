@@ -1,7 +1,8 @@
-> [!NOTE] This document outlines the language's design, feature sets, trade
-> offs, soundness and related aspects. It aims to provide a detailed and
-> unambiguous informal specification, serving as a reliable reference. It is an
-> ongoing process, and nothing is finalized.
+> [!NOTE]\
+> This document outlines the language's design, feature sets, trade offs,
+> soundness and related aspects. It aims to provide a detailed and unambiguous
+> informal specification, serving as a reliable reference. It is an ongoing
+> process, and nothing is finalized.
 
 ______________________________________________________________________
 
@@ -309,10 +310,11 @@ This is semantically the same as:
   (* a b))
 ```
 
-> [!NOTE] While inline expressions offer a flexible, quick way to guide the
-> compiler locally, they should be used sparingly. Whenever a function signature
-> becomes complex, involving dense modal logic, effects, or refinements, the
-> top-level `val`-annotation form is preferred to keep things readable.
+> [!NOTE]\
+> While inline expressions offer a flexible, quick way to guide the compiler
+> locally, they should be used sparingly. Whenever a function signature becomes
+> complex, involving dense modal logic, effects, or refinements, the top-level
+> `val`-annotation form is preferred to keep things readable.
 
 #### 2.6. Calling a function just for its side-effects
 
@@ -639,8 +641,8 @@ subsections. Let's explore the three view types Miru provides: `string-view`,
 intertwined with modalities (an implementation of structural co-effects) and
 borrowing, which we will explore in further detail later.
 
-> [!NOTE] This section requires ironing out modalities and cross-mode
-> interaction.
+> [!NOTE]\
+> This section requires ironing out modalities and cross-mode interaction.
 
 #### 4.6. Sets
 
@@ -2178,94 +2180,71 @@ To revise, polarity constraints are inert, and they unify monotonically.
     `b)
 ```
 
-> [!NOTE] The section below is yet to be serialized properly.
+### 14. Liquid refinement (Z3)
+
+#### 14.1. Refinement predicates
+
+Liquid refinement types attach logical conditions to standard types to enforce
+precise constraints, like restricting an integer to be strictly positive. An
+automated SMT solver (Z3) then verifies these rules at compile time, catching
+invariant violations early without requiring manual proofs. Refinements use
+pipes `|` to separate the type from the predicate.
+
+Let's start by modeling an array dimension and bounds check.
 
 ```clojure
-;; Miru integrates SMT solvers to provide native support for Liquid Refinement
-;; types! A rather common runtime check is array bounds but with liquid types,
-;; we can prove that an index never leaves the array's bounds at compile-time!
+(val nth : (val i   : int)        | (&& (>= i 0) (< i (Array/length arr)))
+;;                       Predicates ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        -> (val arr : (array int) | (= 1 (Array/row-dim)))
+;; Aliases ^^^^^^^^^^^^^^^^^^^^^^
+        -> int)
+(val nth [i arr]
+  (Array/nth-offset-unsafe i arr))
+;; ^^^^^^^^^^^^^^^^^^^^^^^ We can use the unsafe version because it's proved
+;;                         at compile-time to be safe.
+```
 
-;; Parameterizing length directly in the array type:
-(val get-at : (arr : (array a))
-           -> (i   : int | (&& (>= i 0) (< i (Array/length arr))))
-           -> a)
-;; Refinement uses the pipe (|) operator.
-;; (Array/length arr) here works as a reflected measure! More on measures and
-;; reflected functions later.
+Both `Array/row-dim` and `Array/length` are reflected measures; its source is
+reflected into the logical language of the SMT solver as an axiom. We'll read
+more on them later.
 
-;; The compiler will ensure that 0 <= i < length(arr) always holds true.
-(let get-at [arr i]
-  ;; The refinement allows us to remove runtime checks from this get call!
-  (Array/get arr i))
+Inline predicates can get really messy at times; we can make them reusable using
+the `predicate`-form.
 
-;; We can also move the inline predicates to predicate definations! Very similar to
-;; LiquidHaskell's predicates.
+```clojure
 (predicate in-bounds [i arr]
   (&& (>= i 0) (< i (Array/length arr))))
-
-;; And use it in the predicate position:
-(val get-at : (arr : (array a))
-           -> (i   : int | (in-bounds i arr))
-           -> a)
-
-;; Additionally, there is a keyword alias too.
-(val get-at : (arr : (array a))
-           -> (i   : int where (in-bounds i arr))
-           -> a)
-
-;; Contract-based specification literature often uses terms like "requires" to define
-;; pre-conditions, "modifies" to track the set of plausibly mutable values, and "ensures"
-;; to define post-conditions. Miru's SMT implementation tries to unify them under one
-;; belt by taking advantage of what the type systems already provides:
-;; 1) We can bind names to positional types, thus making them referenceable.
-;; 2) Mutability being a property of the data-structure makes mutation sets inferable.
-;; 3) Pre-conditions and post-conditions can be merged into a single expression.
-
-;; A more thorough e.g. of merged conditions:
-(val safe-div : (num   : int)
-             ;; The merger simply dissolves into the "conditions that matter" for a type.
-             -> (denom : int | (!= denom 0))
-             -> (res   : int | (== (* res denom) num)))
-
-;; NOTE: While allowed, non-linear arithmetic like x * y is undecidable, but we
-;; can treat them as uninterpreted functions to modify the approach the solver
-;; takes.
-
-;; Let's talk about procedural macros. MSP handles most of the usecases one would like to
-;; use macros for in languages like Rust but they can't extend the syntax of the language.
-;; Macros-based reflection is also a great way to cover the grounds given Miru doesn't
-;; provide any *intrinsic* support for reflection; neither static nor dynamic. The macro
-;; model is very similar to Rust. Procedural macros can be of two forms: function-style
-;; macros and attribute macros.
-
-;; Example of a function-style macro that embeds an HTML-esque DSL:
-(#html ; Macro invocation looks similar to functions but are prepended with a #!
-  <html>
-    <head>
-      <title>{ "This is a new one!" }</title>
-      ;; Comments are still comments but depends on the implementation!
-      ;; Note, we use { ... } to embed Miru values, which is a good distinction.
-    </head>
-    <body>
-      <button>{ "This button does nothing so far..." }</button>
-    </body>
-  </html>)
-
-;; Example of an attribute macro that derives a modular implicit for a type:
-#[(derive Show)]
-(type colors
-  (Red   int)
-  (Green int)
-  (Blue  int))
-
-;; Other forms include:
-#[shiny-macro]
-#[(shiny-macro-with-payload ...)]
-;; "..." has the same syntax freedom as (#<name> ...) which is passed as TokenStream.
-
-;; These were the examples of outer attributes i.e. applied to the specific term
-;; immediately following them. Miru has has inner attributes which are applied to the
-;; module itself.
-
-#![allow(dead-code)] ; We'll see them often when dealing with module level options.
 ```
+
+And use them as usual.
+
+```clojure
+(val nth : (val i   : int)        | (in-bounds i arr)
+        -> (val arr : (array int) | (= 1 (Array/row-dim)))
+        -> int)
+```
+
+Contract-based specification literature often uses terms like "requires" to
+define pre-conditions, "modifies" to track the set of plausibly mutable values,
+and "ensures" to define post-conditions. Miru's SMT implementation tries to
+unify them under one belt by taking advantage of what the type systems already
+provides:
+
+- We can bind names to types, thus making them referenceable.
+- Mutability being a property of the data-structure makes mutation sets-
+  inferable.
+- Pre-conditions and post-conditions can be merged into a single expression.
+
+A more thorough example of merged conditions follows.
+
+```clojure
+(val safe-div : (val num   : int)
+             -> (val denom : int | (!= denom 0))
+             -> (val res   : int | (== (* res denom) num)))
+             ; The merger simply dissolves into "conditions that matter" for
+             ; a type.
+```
+
+> [!NOTE]\
+> While allowed, non-linear arithmetic like `x * y` is undecidable, but we can
+> treat them as uninterpreted functions to modify the approach the solver takes.
