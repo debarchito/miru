@@ -47,7 +47,7 @@ into alternatives down the line.
 
 #### 2.1. The `val`-form
 
-All bindings use the `val`-form. This includes nullary (arity = 0) named
+All form of bindings use the `val`-form. This includes nullary (arity = 0) named
 bindings and fixed-arity (arity >= 1) function bindings. Bindings are the
 fundamental value units (hence `val`) in Miru. They are immutable and
 sequential.
@@ -90,9 +90,12 @@ regardless of its arity.
 
 ;; Applying the new function.
 (x 2 3) ; (+ 30 (* 2 3)) = 36
+
+;; Evalues the function `x` and rebinds the value to the same name.
+(val x (x 2 3))
 ```
 
-#### 2.2. Sequential scopes and parallel bindings
+#### 2.2. Sequential scopes, threading and parallel bindings
 
 `val`-form is sequential but requires an existing scope to bind to. In such
 cases, we can use the `begin`-form to introduce a new top-down sequential scope.
@@ -102,6 +105,17 @@ cases, we can use the `begin`-form to introduce a new top-down sequential scope.
   (val x 10)
   (val y 11)
   (+ x y)) ; 21
+```
+
+Threading or piping can be done using the `do`-form. It is strictly thread-last
+i.e. the element to be processed must be the last argument of each partial
+application.
+
+```clojure
+(do
+  (..= 1 6) ; An inclusive range.
+  (filter odd?)
+  (foldr + 0)) ; 9
 ```
 
 Parallel bindings can be introduced using two ways: product unpacking and the
@@ -145,25 +159,24 @@ tail-recursive implementation of factorial. Miru will automatically perform
 tail-call elimination for all tail-recursive functions.
 
 ```clojure
-(val (rec factorial) [n (val %acc 1)] ; You can inline `val`-forms to set
-                                      ; default values for `%<named>` arguments.
+(val (rec factorial) [n (val acc 1)] ; You can inline `val`-forms to set
+                                      ; default values for arguments.
   (if (<= n 1)
     acc
     (factorial (- n 1) (* n acc))))
-;;                          ^^^ Once bound, you can refer them without `%`.
 
 ;; Now, let's call it.
 (factorial 6) ; 720
 
 ;; Or, get a tad bit explicit.
-(factorial (val %acc 1) (val %n 6)) ; The order doesn't matter.
+(factorial (val acc 1) (val n 6)) ; The order doesn't matter.
 ```
 
 If we try to do the same but without the `rec` specifier, we are greeted with an
 error.
 
 ```clojure
-(val factorial [n (val %acc 1)]
+(val factorial [n (val acc 1)]
   (if (<= n 1)
     acc
     (factorial (- n 1) (* n acc))))
@@ -174,15 +187,15 @@ error.
 We can extend this naturally to mutually recursive functions.
 
 ```clojure
-(val (rec is-even?) [n] ; Boolean functions end in `?` as convention.
+(val (rec even?) [n] ; Boolean functions end in `?` as convention.
   (match n
     0 true
-    n (is-odd? (- n 1))))
+    n (odd? (- n 1))))
 
-(and is-odd? [n]
+(and odd? [n]
   (match n
     0 false
-    n (is-even? (- n 1))))
+    n (even? (- n 1))))
 ```
 
 Miru enforces a strict xor across all chained bindings. An entire sequence of
@@ -197,7 +210,7 @@ style, the `fn`-form, and the `#(...)` reader macro for `fn`-forms.
 
 ```clojure
 (val factorial
-  (Function/fix #(fn [n (val %acc 1)]
+  (Function/fix #(fn [n (val acc 1)]
     (if (<= n 1)
       acc
       (% (- n 1) (* n acc))))))
@@ -210,7 +223,7 @@ This can also be written without `#(...)`.
 ```clojure
 (val factorial
   (Function/fix (fn [self]
-    (fn [n (val %acc 1)]
+    (fn [n (val acc 1)]
       (if (<= n 1)
         acc
         (self (- n 1) (* n acc)))))))
@@ -298,11 +311,12 @@ modalities, and refinements.
 
 ```clojure
 (val multiply [(val a : int) b]
-  (val (* a b) : int)) ; There is no separate type marker for returning values
-                       ; we annotate the final returning expression directly.
+  (val (* a b) : int))
+;;     ^^^^^^^ Expressions are also allowed.
 ```
 
-This is semantically the same as:
+There is no separate type marker for returning values exist; we annotate the
+final returning expression directly. This is semantically the same as:
 
 ```clojure
 (val multiply : int -> _ -> int)
@@ -1331,6 +1345,14 @@ order.
                 (val compare #(>= %1 %2))))
 ```
 
+To make our lives easier, Miru also provides path-threaded coercion using `:=>`.
+The modules could also be defined as:
+
+```clojure
+(val Int-asc :=> ORD) ; `t = int` will be derived by the compiler automatically.
+(val Int-desc :=> ORd)
+```
+
 We can use the functor to get our sorter implementations.
 
 ```clojure
@@ -1856,14 +1878,13 @@ for a context using the `val`-form.
 (val print-show [x]
   (println (f"Printing {}!" (?S/show x))))
 ;;                           ^^ `?<id>` is how we extract a context from the
-;;                              context row. They are like `%<named>` arguments
-;;                              but ambient.
+;;                              context row.
 ```
 
 Let's implement the `SHOW` signature for integers and lists.
 
 ```clojure
-(val Show-int :> (SHOW (type t int)))
+(val Show-int :=> SHOW)
 (val Show-int (struct
                 (type t int)
                 (val show #(Int/into-string %))))
@@ -2205,8 +2226,7 @@ Let's start by modeling an array dimension and bounds check.
 ```
 
 Both `Array/row-dim` and `Array/length` are reflected measures; its source is
-reflected into the logical language of the SMT solver as an axiom. We'll read
-more on them later.
+reflected into the SMT solver as an axiom. We'll read more on them later.
 
 Inline predicates can get really messy at times; we can make them reusable using
 the `predicate`-form.
