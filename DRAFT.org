@@ -1,0 +1,14 @@
+#+begin_quote
+*NOTE:* This document outlines the language's design, feature sets,
+trade offs, soundness and related aspects. It aims to provide a
+detailed and unambiguous reference. It is an ongoing process, and
+nothing is finalized.
+#+end_quote
+
+Miru is a strictly evaluated functional language from the ML family
+that uses S-expressions for its primary syntax. It aims to compose
+bleeding edge computer science research like effects handlers,
+co-effects, ordered modalities, first-class modules, liquid refinement
+types, and others orthogonally. It is designed to be maximally
+pragmatic and useful for general purpose computing while retaining the
+necessary features to function as a strong scientific language.
