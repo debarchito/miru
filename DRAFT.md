@@ -151,7 +151,7 @@ When function bindings are chained using the `and`-form, they share a mutual
 scope, allowing them to freely reference one another regardless of their lexical
 ordering. Let's take a brief look at recursion in the next section.
 
-#### 2.3. Recursion and named arguments
+#### 2.3. Recursion
 
 Recursive functions must be marked with a `rec` specifier. Specifiers are
 special positional properties attached to names. Let's start with a
@@ -159,24 +159,19 @@ tail-recursive implementation of factorial. Miru will automatically perform
 tail-call elimination for all tail-recursive functions.
 
 ```clojure
-(val (rec factorial) [n (val acc 1)] ; You can inline `val`-forms to set
-                                      ; default values for arguments.
+(val (rec factorial) [n acc]
   (if (<= n 1)
     acc
     (factorial (- n 1) (* n acc))))
 
-;; Now, let's call it.
-(factorial 6) ; 720
-
-;; Or, get a tad bit explicit.
-(factorial (val acc 1) (val n 6)) ; The order doesn't matter.
+(factorial 6 0) ; 720
 ```
 
 If we try to do the same but without the `rec` specifier, we are greeted with an
 error.
 
 ```clojure
-(val factorial [n (val acc 1)]
+(val factorial [n acc]
   (if (<= n 1)
     acc
     (factorial (- n 1) (* n acc))))
@@ -210,7 +205,7 @@ style, the `fn`-form, and the `#(...)` reader macro for `fn`-forms.
 
 ```clojure
 (val factorial
-  (Function/fix #(fn [n (val acc 1)]
+  (Function/fix #(fn [n acc]
     (if (<= n 1)
       acc
       (% (- n 1) (* n acc))))))
@@ -223,7 +218,7 @@ This can also be written without `#(...)`.
 ```clojure
 (val factorial
   (Function/fix (fn [self]
-    (fn [n (val acc 1)]
+    (fn [n acc]
       (if (<= n 1)
         acc
         (self (- n 1) (* n acc)))))))
@@ -240,8 +235,14 @@ types. We'll explore them and their orthogonal variants in later chapters.
 
 #### 2.4. Automatic currying
 
-Miru supports automatic currying. Consequently, variadic arguments are not
-supported due to their structural incompatibility.
+Miru supports automatic currying. Consequently, variadic arguments, named
+arguments, and default arguments are not supported due to their structural
+incompatibility and awkwardness.
+
+The need for named arguments is entirely replaced by utilizing (stack allocated)
+structural records instead. Similarly, default arguments can be replaced by
+composing functions returning a default record value with functional update.
+We'll learn more about them in later chapters.
 
 ```clojure
 (val multiply [a b]

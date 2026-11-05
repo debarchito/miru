@@ -12,3 +12,232 @@ co-effects, ordered modalities, first-class modules, liquid refinement
 types, and others orthogonally. It is designed to be maximally
 pragmatic and useful for general purpose computing while retaining the
 necessary features to function as a strong scientific language.
+
+* 1. Starting out with comments
+
+The easiest way to comment is by prefixing a phrase with ~;~. The number
+of ~;~ characters that follow changes the semantic meaning of the
+comment.
+
+#+begin_src clojure
+; This comment is used for inline or internal notes.
+;; This comment used for standalone lines.
+
+;;; This comment is used for documentation. It is placed on top of
+;;; expressions or declarations.
+
+#! Hashbangs are also treated as comments. They are semantically the
+#! same as `;;`.
+#+end_src
+
+Miru has various built-in reader macros. One of them is the discard
+reader macro ~#_ <form>~, that discards any form that immediately
+follows it, essentially turning it into an inplace comment. An
+indentation delimiter between the reader macro and the form is
+mandatory when the first token of the form is a valid identifier.
+
+#+begin_src clojure
+(+ 1 #_ 2 3) ; (+ 1 3)
+
+(+ 1 #_2 3)
+;;   ^^^ ERROR: Unbounded reader macro `_2`.
+
+(+ 1 #_(+ 1 1) 3) ; (+ 1 3)
+                  ; It works because `(` is not a valid identifier.
+#+end_src
+
+To note, reader macros are not user extensible. Extensible reader
+macros are an evergreen minefield of broken tooling that Miru aims to
+avoid. We'll look into safer alternatives down the line.
+
+* 2. Within bindings
+
+** 2.1. Named and function bindings
+
+Bindings use the ~val~-form. This includes nullary (arity = 0) named
+bindings and fixed-arity (arity >= 1) function bindings. They are
+immutable and sequential.
+
+#+begin_src clojure
+(val name "Miru") ; This is a named binding.
+
+;; This is a unary function binding. Arguments are passed in tuple
+;; form [<x> <y> ...].
+(val greet [name]
+  (String/concat " " '("Hello" name))) ; '(...) is a list at all
+                                       ; times, never a quotation.
+
+;; Now, we can apply the function.
+(greet name) ; Hello Miru
+#+end_src
+
+In this example, ~String~ is a module, ~/~ is the universal inspection
+operator, and ~concat~ is a binary function defined inside the ~String~
+module. Note that all bindings and types in Miru follow the ~kebab-case~
+convention; the only exceptions include modules and type constructors
+which use ~Header-kebab-case~.
+
+Bindings being sequential make shadowing an intrinsic property. In
+fact, a binding of arbitrary arity can be shadowed by another binding
+of the same name, regardless of its arity.
+
+#+begin_src clojure
+(val x 10)
+
+;; Evaluates `x` to 10 and rebinds it to 30, shadowing the previous
+;; `x`.
+(val x (+ x 20))
+
+;; Shadows `x` with a new function binding. A function binding is just
+;; a lambda bound to a named binding.
+(val x [y z]
+  ; `x` inside the body refers to the outer named binding returning
+  ; `30`. Functions are non-recursive by default to preserve the
+  ; sequential semantics; if `x` wasn't defined in the immediate
+  ; parent scope, this would fail to compile.
+  (+ x (* y z))) 
+
+;; Basic function application.
+(x 2 3) ; 36
+
+;; Evaluates `x` and rebinds the value to the same name. This is not a
+;; recursive call.
+(val x (x 2 3))
+#+end_src
+
+** 2.2. Sequential scopes, threading and parallel bindings
+
+~val~-form is sequential but requires an existing scope to bind to. In
+such cases, we can use the ~begin~-form to introduce a fresh top-down
+sequential scope.
+
+#+begin_src clojure
+(begin
+  (val x 10)
+  (val y 11)
+  (+ x y)) ; 21
+#+end_src
+
+Threading is performed using the ~do~-form. It is strictly thread-last
+i.e. the value to be threaded is applied as the last argument of each
+partial application.
+
+#+begin_src clojure
+(do
+  (..= 1 6) ; An inclusive range.
+  (filter odd?)
+  (foldr + 0)) ; 9
+#+end_src
+
+Parallel bindings can be introduced using two ways:
++ Product unpacking
++ ~and~-form
+
+Miru only allows us to unpack product types i.e. tuples and records
+using the ~val~-form because they can be unpacked using a single
+exhaustive pattern. This doesn't hold true for sum types or arbitrary
+data structures like lists or arrays; the ~match~-form is a strictly
+better fit for those use-cases.
+
+#+begin_src clojure
+;; `a` and `b` are evaluated in parallel.
+(let [a b] [1.0 "Hello, World!"])
+#+end_src
+
+~and~-form allows us to introduce multiple distinct bindings
+simultaneously. All expressions in a binding chain are evaluated in
+parallel within the parent scope before any new symbols are bound.
+
+#+begin_src clojure
+;; These expressions are evaluated parallely in the parent scope; `x`
+;; can't query it's environment to read the value of `y`.
+(val y 39)
+(and x (+ y 1))
+;;        ^ ERROR: Unbound binding `y`.
+#+end_src
+
+This makes `and`-form great for handling mutual recursion. When
+function bindings are chained using the `and`-form, they share a
+mutual scope, allowing them to freely reference one another regardless
+of their lexical ordering. Let's take a brief look at recursion in the
+next section.
+
+** 2.3. Recursion
+
+Recursive functions must be marked with a ~rec~ specifier. Specifiers
+are special positional properties attached to names. Let's start with
+a tail-recursive implementation of factorial. Miru will perform
+tail-call elimination for all tail-recursive functions.
+
+#+begin_src clojure
+(val (rec factorial) [n acc]
+  (if (<= n 1)
+    acc
+    (factorial (- n 1) (* n acc))))
+
+(factorial 6 1) ; 720
+#+end_src
+
+If we try to do the same but without the ~rec~ specifier, we are
+greeted with an error.
+
+#+begin_src clojure
+(val factorial [n acc]
+  (if (<= n 1)
+    acc
+    (factorial (- n 1) (* n acc))))
+;;  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ERROR: Unbound binding `factorial`.
+;;                                 Did you mean to mark `factorial` as
+;;                                 recursive?
+;;
+;;                                 1 |(val (rec factorial) [n acc]
+;;                                         +++++         +
+#+end_src
+
+We can extend this naturally to mutually recursive functions.
+
+#+begin_src clojure
+(val (rec even?) [n] ; Boolean functions end in `?` as convention.
+  (match n
+    0 true
+    n (odd? (- n 1))))
+
+(and odd? [n]
+  (match n
+    0 false
+    n (even? (- n 1))))
+#+end_src
+
+An entire sequence of `val` and `and`-forms must either be entirely
+mutually recursive or non-recursive. We can't mix both behaviors
+within the same chain.
+
+Miru supports fixed-point recursion using the `fix` function from the
+`Function` module, allowing us to bypass explicit recursion specifiers
+entirely. Any function definition can be treated as a fixed point by
+mapping it to a core combinator. Below, we reimplement the factorial
+function using this fixed-point style, the ~fn~-form, and the ~#(...)~
+reader macro for ~fn~-forms.
+
+#+begin_src clojure 
+(val factorial (Function/fix
+  ; `%` denotes the first argument. `%n` denotes the nth
+  ; argument.
+  #(if (<= %2 1)
+     acc
+     (% (- %2 1) (* %2 %3))))))
+#+end_src
+
+This can also be written using the plain old ~fn~-form.
+
+#+begin_src clojure
+(val factorial (Function/fix
+  (fn [self n acc]
+    (if (<= n 1)
+      acc
+      (self (- n 1) (* n acc)))))))
+#+end_src
+
+Fix-points aren't limited to functions; we can also find fix-points of
+data types. We'll explore them and their orthogonal variants in later
+chapters.
