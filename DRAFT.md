@@ -922,13 +922,13 @@ throughout the language.
 
 The splat operator `<id>..` can be used to splat the fields of a record into
 another record. It's the logical equivalent of the struct update syntax in Rust
-or functional update in OCaml; it always creates a brand new record. The fields
-are either copied or their ownerships are moved given the values are
-non-copyable.
+or functional update in OCaml; it creates a brand new record. The fields are
+either copied or their ownerships are moved given the values are non-copyable
+and unique.
 
 ```clojure
 (val s1 { id "M1", name "MIRU" }) ; Say of type `session`.
-(val s2 { s1.., name "Miru" }) ; Gets the fields of `s1` and updates `name`.
+(val s2 { name "Miru", s1.. }) ; Define `name` and take the rest from `s1`.
 ```
 
 When splatting a structural record, the splat operator preserves row
@@ -939,9 +939,7 @@ nature of the data:
 
 ```clojure
 (val s1 { id "M1", name "MIRU", .. })
-;; The row operator `..` flows from the source; no additional row operator
-;; `..` is required.
-(val s2 { s1.., name "Miru" }) ; { id : string, name : string, .. }
+(val s2 { name "Miru", s1.. }) ; { id : string, name : string, .. }
 ```
 
 If we wish to force a structural record to close down into a rigid principal
@@ -949,18 +947,8 @@ type during a splat operation, we must explicitly coerce the resulting
 expression:
 
 ```clojure
-(val s3 (val { s1.., name "Miru" } :> session)) ; The row variable `..` is
+(val s3 (val { name "Miru", s1.. } :> session)) ; The row variable `..` is
                                                 ; explicitly consumed here.
-```
-
-Records must be splat before their fields can be updated. This order is not
-valid:
-
-```clojure
-(val s1 { id "M1", name "MIRU" })
-(val s2 { name "Miru", s1.. })
-;;                     ^^^^ ERROR: Invalid splat position. Splats must
-;;                     precede field updates.
 ```
 
 #### 6.6. Polarity constraints
